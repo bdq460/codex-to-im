@@ -5,3 +5,7 @@ dist/
 config.env
 .codegraph
 .cursor
+# Local configuration, diagnostics and private receipts
+.local-runtime/
+docs/local-changes/
+.DS_Store

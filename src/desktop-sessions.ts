@@ -1032,8 +1032,8 @@ export function listDesktopSessions(limit?: number): DesktopSessionSummary[] {
   if (!fs.existsSync(root)) return [];
   const archivedThreadIds = loadArchivedThreadIds();
   const threadIndexEntries = loadThreadIndexEntries(archivedThreadIds);
-  const savedWorkspaceRoots = loadSavedWorkspaceRoots();
   const visibleThreads = loadVisibleDesktopThreads(limit);
+  const savedWorkspaceRoots = visibleThreads ? null : loadSavedWorkspaceRoots();
   const visibleThreadIds = visibleThreads?.map((thread) => thread.id) || null;
   const visibleThreadSet = visibleThreadIds ? new Set(visibleThreadIds) : null;
   const visibleThreadUpdatedAt = new Map(visibleThreads?.map((thread) => [thread.id, thread.updatedAtMs]) || []);

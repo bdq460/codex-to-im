@@ -1,3 +1,4 @@
+import { preferredCodexExecutable } from './codex-executable.js';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -206,6 +207,8 @@ function getThreadStatus(value: unknown): CodexAppServerThreadStatus {
 }
 
 export function resolveBundledCodexExecutable(): string {
+  const preferred = preferredCodexExecutable();
+  if (preferred) return preferred;
   const target = PLATFORM_TARGETS[`${process.platform}:${process.arch}`];
   if (!target) {
     throw new Error(`Unsupported Codex platform: ${process.platform} (${process.arch})`);

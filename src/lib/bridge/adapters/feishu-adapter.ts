@@ -1,3 +1,4 @@
+import { buildActionCard } from '../markdown/action-card.js';
 /**
  * Feishu (Lark) Adapter — implements BaseChannelAdapter for Feishu Bot API.
  *
@@ -500,10 +501,13 @@ export class FeishuAdapter extends BaseChannelAdapter {
       const messageId = event?.context?.open_message_id || event?.open_message_id || '';
       const userId = event?.operator?.open_id || event?.open_id || '';
 
-      if (!chatId) return FALLBACK_TOAST;
+      if (!chatId || !userId || !this.isAuthorized(userId, chatId)) return { toast: { type: 'error', content: '无权操作此聊天' } };
+      const actionId = `${messageId}:action:${event.token || crypto.randomUUID()}`;
+      if (this.seenMessageIds.has(actionId)) return FALLBACK_TOAST;
+      this.addToDedup(actionId);
 
       const callbackMsg: import('../types.js').InboundMessage = {
-        messageId: messageId || `card_action_${Date.now()}`,
+        messageId: actionId,
         address: {
           channelType: this.channelType,
           channelProvider: this.provider,
@@ -1339,6 +1343,9 @@ export class FeishuAdapter extends BaseChannelAdapter {
 
     // If there are inline buttons (permission prompts), send card with action buttons
     if (message.inlineButtons && message.inlineButtons.length > 0) {
+      if (message.inlineButtons.flat().every(button => button.callbackData.startsWith('session:'))) {
+        return this.sendSessionNavigationCard(message.address.chatId, text, message.inlineButtons);
+      }
       return this.sendPermissionCard(message.address.chatId, text, message.inlineButtons);
     }
 
@@ -1357,6 +1364,18 @@ export class FeishuAdapter extends BaseChannelAdapter {
 
   private getOpenApiBaseUrl(): string {
     return feishuSiteToApiBaseUrl(this.site);
+  }
+
+  private async sendSessionNavigationCard(chatId: string, text: string, buttons: import('../types.js').InlineButton[][]): Promise<SendResult> {
+    if (!this.restClient) return { ok: false, error: 'Feishu client not initialized' };
+    try {
+      const result = await this.withFeishuRequestTimeout(chatId, 'im.message.create:session-navigation', () => this.restClient!.im.message.create({
+        params: { receive_id_type: 'chat_id' },
+        data: { receive_id: chatId, msg_type: 'interactive', content: buildActionCard(text, buttons, chatId) },
+      }));
+      if (result?.data?.message_id) return { ok: true, messageId: result.data.message_id };
+      return { ok: false, error: `会话卡片发送失败：${result?.msg || '无消息回执'}` };
+    } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) }; }
   }
 
   private async getTenantAccessToken(): Promise<string> {

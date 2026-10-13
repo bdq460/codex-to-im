@@ -1236,8 +1236,9 @@ describe('CodexProvider error events', () => {
     assert.ok(recoveryStatus);
     assert.equal(JSON.parse(recoveryStatus!.data).error_code, 'desktop_transport_lost');
     assert.ok(errorEvent);
-    assert.match(errorEvent!.data, /会话恢复失败/);
-    assert.match(errorEvent!.data, /\/t 0/);
+    assert.match(errorEvent!.data, /连接 Codex 服务失败或超时/);
+    assert.match(errorEvent!.data, /网络或代理/);
+    assert.doesNotMatch(errorEvent!.data, /上一轮执行进程未正常退出/);
     assert.equal((provider as any).codex, null);
   });
 

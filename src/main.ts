@@ -1,3 +1,4 @@
+import { inheritSystemProxy } from './network-proxy.js';
 /**
  * Daemon entry point for codex-to-im.
  *
@@ -76,6 +77,7 @@ async function main(): Promise<void> {
 
   const config = loadConfig();
   setupLogger();
+  if (inheritSystemProxy()) console.log("[codex-to-im] Inherited macOS system proxy for Codex child processes.");
   console.log(`[codex-to-im] Starting bridge (run_id: ${runId})`);
 
   const settings = configToSettings(config);

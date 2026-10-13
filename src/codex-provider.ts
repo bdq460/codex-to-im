@@ -1,3 +1,4 @@
+import { preferredCodexExecutable } from './codex-executable.js';
 /**
  * Codex Provider — LLMProvider implementation backed by @openai/codex-sdk.
  *
@@ -141,10 +142,13 @@ function normalizeCodexErrorMessage(message: string | null | undefined): string 
   if (!trimmed) return 'Codex 执行失败，请稍后重试。';
 
   const lower = trimmed.toLowerCase();
-  if (
-    lower.includes('timeout waiting for child process to exit')
-    || lower.includes('reconnecting...')
-  ) {
+  if (lower.includes('model is not supported') || lower.includes('model') && lower.includes('not supported when using codex')) {
+    return `当前 Codex 登录通道不支持所选模型。任务未完成，会话已保留；请用 /model 切换到当前通道支持的模型后重试。\n${trimmed}`;
+  }
+  if (lower.includes('reconnecting...') || lower.includes('request timed out') || lower.includes('connection refused')) {
+    return '连接 Codex 服务失败或超时。这条任务未完成，请检查网络或代理后重试；会话绑定仍保留，可发送 /t 切换会话。';
+  }
+  if (lower.includes('timeout waiting for child process to exit')) {
     return 'Codex 会话恢复失败，上一轮执行进程未正常退出。请稍后重试；如果连续失败，请新开线程或切换到 /t 0。';
   }
 
@@ -409,7 +413,9 @@ export class CodexProvider implements LLMProvider {
     const baseUrl = process.env.CTI_CODEX_BASE_URL || undefined;
 
     const CodexClass = sdk.Codex;
+    const executable = preferredCodexExecutable();
     const codex = new CodexClass({
+      ...(executable ? { codexPathOverride: executable } : {}),
       ...(apiKey ? { apiKey } : {}),
       ...(baseUrl ? { baseUrl } : {}),
     });

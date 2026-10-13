@@ -1,3 +1,4 @@
+import { decodeSessionAction, sendSessionPicker, newSessionCommand } from './session-navigation.js';
 /**
  * Bridge Manager — singleton orchestrator for the multi-IM bridge system.
  *
@@ -662,7 +663,7 @@ const ADAPTER_RUNTIME = createAdapterRuntime(getState, {
   handleMessage,
   processWithSessionLock: (sessionId, fn) => INTERACTIVE_RUNTIME.processWithSessionLock(sessionId, fn),
   isNumericPermissionShortcut,
-  resolveSessionIdForMessage: (msg) => router.resolve(msg.address).codepilotSessionId,
+  resolveSessionIdForMessage: (msg) => getBridgeContext().store.getChannelBinding(msg.address.channelType, msg.address.chatId)?.codepilotSessionId || `unbound:${msg.address.channelType}:${msg.address.chatId}`,
 });
 
 /**
@@ -897,6 +898,29 @@ async function handleMessage(
   };
 
   // Handle callback queries (permission buttons)
+  if (msg.callbackData?.startsWith('session:')) {
+    if (!adapter.isAuthorized(msg.address.userId || '', msg.address.chatId)) { ack(); return; }
+    try {
+      const action = decodeSessionAction(msg.callbackData, msg.address);
+      if (!action) {
+        await deliverBridgeNotice(adapter, msg.address, '选择入口已失效，请重新选择会话。');
+        await sendSessionPicker(adapter, msg.address, { recent: true });
+      } else if (action.kind === 'list') {
+        await sendSessionPicker(adapter, msg.address, { offset: action.offset });
+      } else if (action.kind === 'enter' && !getDesktopSessionByThreadIdSafe(action.threadId, 'card action')) {
+        await deliverBridgeNotice(adapter, msg.address, '这条会话已归档或不可用，请重新选择。');
+        await sendSessionPicker(adapter, msg.address, { recent: true });
+      } else {
+        await handleCommand(adapter, { ...msg, messageId: msg.callbackMessageId || msg.messageId }, action.kind === 'new' ? newSessionCommand() : `/thread ${action.threadId}`);
+      }
+    } catch (error) {
+      console.error('[bridge-manager] Session navigation failed:', describeUnknownError(error));
+      await deliverBridgeNotice(adapter, msg.address, '会话操作失败，请发送 /t 刷新后重试。');
+    }
+    ack();
+    return;
+  }
+
   if (msg.callbackData) {
     const handled = broker.handlePermissionCallback(msg.callbackData, msg.address.chatId, msg.callbackMessageId);
     if (handled) {
@@ -1019,6 +1043,15 @@ async function handleMessage(
   }
 
   if (!text && !hasAttachments) { ack(); return; }
+
+  const binding = store.getChannelBinding(msg.address.channelType, msg.address.chatId);
+  if (!binding || binding.active === false || !store.getSession(binding.codepilotSessionId)) {
+    if (adapter.provider === 'feishu') {
+      await sendSessionPicker(adapter, msg.address, { unbound: true, recent: true });
+      ack();
+      return;
+    }
+  }
 
   await runInteractiveMessage(adapter, msg, text, hasAttachments ? msg.attachments : undefined, {
       registerInteractiveTask: (task) => INTERACTIVE_RUNTIME.registerInteractiveTask(task),

@@ -1,3 +1,5 @@
+import path from 'node:path';
+import { sendSessionPicker } from './session-navigation.js';
 import { getOrCreateDraftSession } from '../../internal-sessions.js';
 import { isCliOnlyCodexModel, readConfiguredCodexModel } from '../../codex-models.js';
 import {
@@ -162,9 +164,15 @@ export async function handleBridgeCommand(
   let responseParseMode: 'Markdown' | 'plain' = getFeedbackParseMode(adapter.channelType);
   let auditResponse = true;
   const currentBinding = store.getChannelBinding(msg.address.channelType, msg.address.chatId);
+  if (adapter.provider === 'feishu' && (!currentBinding || currentBinding.active === false || !store.getSession(currentBinding.codepilotSessionId))
+    && !['/start', '/new', '/thread', '/threads', '/help', '/health', '/perm', '/unbind'].includes(command)) {
+    await sendSessionPicker(adapter, msg.address, { unbound: true, recent: true });
+    return;
+  }
 
   switch (command) {
     case '/start':
+      if (adapter.provider === 'feishu') { await sendSessionPicker(adapter, msg.address, { unbound: !currentBinding, recent: true }); return; }
       response = [
         'Codex to IM',
         '',
@@ -203,7 +211,7 @@ export async function handleBridgeCommand(
 
       const workDir = resolved.workDir;
       ensureWorkingDirectoryExists(workDir);
-      const binding = router.createBinding(msg.address, workDir);
+      const binding = router.createBinding(msg.address, workDir, path.basename(workDir));
       const session = store.getSession(binding.codepilotSessionId);
       auditCommandBindingChange(
         'new_session',
@@ -287,6 +295,7 @@ export async function handleBridgeCommand(
         break;
       }
       if (threadArgs === 'all') {
+        if (adapter.provider === 'feishu') { await sendSessionPicker(adapter, msg.address); return; }
         const desktopSessions = getDisplayedDesktopThreads(MAX_DESKTOP_THREAD_LIST_LIMIT);
         if (!desktopSessions) {
           response = '读取桌面会话列表失败，请稍后重试。';
@@ -397,6 +406,10 @@ export async function handleBridgeCommand(
     }
 
     case '/threads': {
+      if (adapter.provider === 'feishu') {
+        await sendSessionPicker(adapter, msg.address, { recent: !/^(all|n\b)/i.test(args) });
+        return;
+      }
       const listArgs = parseDesktopThreadListArgs(args);
       if (!listArgs) {
         response = `用法：/threads、/threads all、/threads n 100（最多 ${MAX_DESKTOP_THREAD_LIST_LIMIT} 条）`;
@@ -425,7 +438,7 @@ export async function handleBridgeCommand(
 
     case '/reasoning': {
       if (!currentBinding) {
-        response = '当前聊天还没有绑定会话。先发送消息创建会话，或先用 `/t 1` 接管桌面会话。';
+        response = '当前聊天还没有绑定会话。请发送 `/t` 选择已有会话或点击新建会话。';
         break;
       }
       const session = store.getSession(currentBinding.codepilotSessionId);
@@ -593,6 +606,7 @@ export async function handleBridgeCommand(
     }
 
     case '/status': {
+      if (adapter.provider === 'feishu' && !currentBinding) { await sendSessionPicker(adapter, msg.address, { unbound: true, recent: true }); return; }
       auditResponse = false;
       const binding = currentBinding;
       if (!binding) {
@@ -670,7 +684,7 @@ export async function handleBridgeCommand(
       const explicitTargetSessionId = args.trim();
       const targetSessionId = explicitTargetSessionId || currentBinding?.codepilotSessionId;
       if (!targetSessionId) {
-        response = '当前聊天还没有绑定会话。先发送消息创建会话，或先用 `/t 1` 接管桌面会话。';
+        response = '当前聊天还没有绑定会话。请发送 `/t` 选择已有会话或点击新建会话。';
         break;
       }
       const diagnosis = await deps.diagnoseSessionHealth(targetSessionId);
@@ -688,7 +702,7 @@ export async function handleBridgeCommand(
 
     case '/history': {
       if (!currentBinding) {
-        response = '当前聊天还没有绑定会话。先发送消息创建会话，或先用 `/t 1` 接管桌面会话。';
+        response = '当前聊天还没有绑定会话。请发送 `/t` 选择已有会话或点击新建会话。';
         break;
       }
 
@@ -835,7 +849,7 @@ export async function handleBridgeCommand(
         ],
         [
           '这个聊天已释放当前会话绑定。',
-          '之后如果直接发送文本，会自动进入新的临时草稿线程。',
+          adapter.provider === 'feishu' ? '之后发送文本会先提示选择会话；发送 /t 可查看最近会话和新建入口。' : '之后如果直接发送文本，会自动进入新的临时草稿线程。',
         ],
         responseParseMode === 'Markdown',
       );

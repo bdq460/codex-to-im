@@ -315,6 +315,7 @@ describe('command-dispatch', () => {
   it('creates a new IM session with /new and points the binding at the requested directory', async () => {
     const store = initTestContext();
     const sent: string[] = [];
+    const projectDirectory = path.join(CTI_HOME, 'common-flow');
     const adapter: any = {
       channelType: 'feishu',
       send: async (message: { text: string }) => {
@@ -328,10 +329,10 @@ describe('command-dispatch', () => {
       adapter,
       {
         address,
-        text: '/new D:\\workspace\\common-flow',
+        text: `/new ${projectDirectory}`,
         messageId: 'incoming-new-1',
       } as any,
-      '/new D:\\workspace\\common-flow',
+      `/new ${projectDirectory}`,
       {
         getActiveTask: () => undefined,
         diagnoseSessionHealth: async () => null,
@@ -341,7 +342,7 @@ describe('command-dispatch', () => {
 
     const binding = store.getChannelBinding(address.channelType, address.chatId);
     assert.ok(binding);
-    assert.equal(binding?.workingDirectory, path.resolve('D:\\workspace\\common-flow'));
+    assert.equal(binding?.workingDirectory, projectDirectory);
     assert.match(sent[0] || '', /已新建会话/);
     assert.match(sent[0] || '', /common-flow/);
   });
