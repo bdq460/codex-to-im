@@ -5,6 +5,7 @@
  * to JSON files in ~/.codex-to-im/data/.
  */
 
+import { rememberSessionMessage } from './lib/bridge/session-interaction-store.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -714,7 +715,7 @@ export class JsonFileStore implements BridgeStore {
   }
 
   insertOutboundRef(_ref: OutboundRefInput): void {
-    // no-op for file-based store
+    rememberSessionMessage({ channelType: _ref.channelType, chatId: _ref.chatId }, _ref.platformMessageId, _ref.codepilotSessionId);
   }
 
   // ── Permission Links ──

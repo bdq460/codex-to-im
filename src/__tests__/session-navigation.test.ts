@@ -104,7 +104,7 @@ describe('session navigation', () => {
       assert.equal(store.getChannelBinding(a.channelType, a.chatId)?.codepilotSessionId, binding.codepilotSessionId);
       await click(encodeSessionAction(a, { kind: 'new' }, 1));
       assert.equal(store.getChannelBinding(a.channelType, a.chatId)?.codepilotSessionId, binding.codepilotSessionId);
-      assert.ok(sent.some(m => m.text.includes('选择入口已失效')));
+      assert.ok(sent.some(m => m.text.includes('入口已失效')));
     } finally { if (old === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = old; fs.rmSync(home, {recursive:true,force:true}); }
   });
   it('unbound inbound message replies immediately without model invocation or draft creation', async () => {

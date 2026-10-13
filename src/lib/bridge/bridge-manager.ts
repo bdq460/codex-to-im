@@ -1,4 +1,6 @@
-import { decodeSessionAction, sendSessionPicker, newSessionCommand } from './session-navigation.js';
+import { sendSessionPicker } from './session-navigation.js';
+import { handleSessionAction, routeSessionReply, sessionInteractionLockId } from './session-interactions.js';
+import { savePendingMessage, rememberSessionMessage } from './session-interaction-store.js';
 /**
  * Bridge Manager — singleton orchestrator for the multi-IM bridge system.
  *
@@ -663,7 +665,7 @@ const ADAPTER_RUNTIME = createAdapterRuntime(getState, {
   handleMessage,
   processWithSessionLock: (sessionId, fn) => INTERACTIVE_RUNTIME.processWithSessionLock(sessionId, fn),
   isNumericPermissionShortcut,
-  resolveSessionIdForMessage: (msg) => getBridgeContext().store.getChannelBinding(msg.address.channelType, msg.address.chatId)?.codepilotSessionId || `unbound:${msg.address.channelType}:${msg.address.chatId}`,
+  resolveSessionIdForMessage: (msg) => sessionInteractionLockId(msg) || getBridgeContext().store.getChannelBinding(msg.address.channelType, msg.address.chatId)?.codepilotSessionId || `unbound:${msg.address.channelType}:${msg.address.chatId}`,
 });
 
 /**
@@ -898,27 +900,18 @@ async function handleMessage(
   };
 
   // Handle callback queries (permission buttons)
+  const sessionInteractionDeps = {
+    busy: (id: string) => !!INTERACTIVE_RUNTIME.getActiveTask(id),
+    command: handleCommand,
+    replay: handleMessage,
+  };
   if (msg.callbackData?.startsWith('session:')) {
-    if (!adapter.isAuthorized(msg.address.userId || '', msg.address.chatId)) { ack(); return; }
-    try {
-      const action = decodeSessionAction(msg.callbackData, msg.address);
-      if (!action) {
-        await deliverBridgeNotice(adapter, msg.address, '选择入口已失效，请重新选择会话。');
-        await sendSessionPicker(adapter, msg.address, { recent: true });
-      } else if (action.kind === 'list') {
-        await sendSessionPicker(adapter, msg.address, { offset: action.offset });
-      } else if (action.kind === 'enter' && !getDesktopSessionByThreadIdSafe(action.threadId, 'card action')) {
-        await deliverBridgeNotice(adapter, msg.address, '这条会话已归档或不可用，请重新选择。');
-        await sendSessionPicker(adapter, msg.address, { recent: true });
-      } else {
-        await handleCommand(adapter, { ...msg, messageId: msg.callbackMessageId || msg.messageId }, action.kind === 'new' ? newSessionCommand() : `/thread ${action.threadId}`);
-      }
-    } catch (error) {
-      console.error('[bridge-manager] Session navigation failed:', describeUnknownError(error));
-      await deliverBridgeNotice(adapter, msg.address, '会话操作失败，请发送 /t 刷新后重试。');
+    try { await handleSessionAction(adapter, msg, sessionInteractionDeps); }
+    catch (error) {
+      console.error('[bridge-manager] Session interaction failed:', describeUnknownError(error));
+      await deliverBridgeNotice(adapter, msg.address, '会话操作未完成。原消息已保留，请勿重复发送；发送 /t 查看会话。');
     }
-    ack();
-    return;
+    ack(); return;
   }
 
   if (msg.callbackData) {
@@ -1044,15 +1037,18 @@ async function handleMessage(
 
   if (!text && !hasAttachments) { ack(); return; }
 
+  if (adapter.provider === 'feishu' && !(await routeSessionReply(adapter, msg, sessionInteractionDeps))) { ack(); return; }
   const binding = store.getChannelBinding(msg.address.channelType, msg.address.chatId);
   if (!binding || binding.active === false || !store.getSession(binding.codepilotSessionId)) {
     if (adapter.provider === 'feishu') {
-      await sendSessionPicker(adapter, msg.address, { unbound: true, recent: true });
+      const pendingId = savePendingMessage(msg);
+      await sendSessionPicker(adapter, msg.address, { unbound: true, recent: true, pendingId });
       ack();
       return;
     }
   }
 
+  if (adapter.provider === 'feishu' && binding) rememberSessionMessage(msg.address, msg.messageId, binding.codepilotSessionId);
   await runInteractiveMessage(adapter, msg, text, hasAttachments ? msg.attachments : undefined, {
       registerInteractiveTask: (task) => INTERACTIVE_RUNTIME.registerInteractiveTask(task),
       registerBridgeTurn: (turn) => TURN_COORDINATOR.registerInteractiveTurn(turn),

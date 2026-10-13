@@ -1,3 +1,4 @@
+import { sessionResultButtons } from './session-navigation.js';
 import type { BaseChannelAdapter } from './channel-adapter.js';
 import type {
   ChannelAddress,
@@ -27,10 +28,11 @@ export async function deliverTextResponse(
   const parseMode = getFeedbackParseMode(adapter.channelType);
   const renderedText = renderFeedbackText(responseText, parseMode);
 
-  if (parseMode === 'Markdown' && adapter.provider === 'feishu') {
+  if (adapter.provider === 'feishu' && (parseMode === 'Markdown' || sessionId)) {
     return deliver(adapter, {
       address,
-      text: responseText,
+      text: parseMode === 'Markdown' ? responseText : renderedText,
+      inlineButtons: sessionId ? sessionResultButtons(address, sessionId) : undefined,
       parseMode: 'Markdown',
       replyToMessageId,
     }, { sessionId, audit: options?.audit });

@@ -40,6 +40,9 @@ export interface SessionKey {
 export interface InboundMessage {
   /** Platform-specific message ID (for dedup and reference) */
   messageId: string;
+  /** Parent/root references from native IM replies. */
+  replyToMessageId?: string;
+  rootMessageId?: string;
   /** Address of the sender */
   address: ChannelAddress;
   /** Plain text content of the message */

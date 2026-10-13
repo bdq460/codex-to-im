@@ -1,3 +1,5 @@
+import { rememberSessionMessage, sessionForMessage } from '../session-interaction-store.js';
+import { sessionResultButtons } from '../session-navigation.js';
 import { buildActionCard } from '../markdown/action-card.js';
 /**
  * Feishu (Lark) Adapter — implements BaseChannelAdapter for Feishu Bot API.
@@ -221,6 +223,8 @@ type FeishuMessageEventData = {
   };
   message: {
     message_id: string;
+    parent_id?: string;
+    root_id?: string;
     chat_id: string;
     chat_type: string;
     message_type: string;
@@ -601,6 +605,8 @@ export class FeishuAdapter extends BaseChannelAdapter {
         return false;
       }
 
+      const sessionId = /^(?:im|mirror):([^:]+):/.exec(cardKey)?.[1];
+      if (sessionId) rememberSessionMessage({ channelType: this.channelType, chatId }, messageId, sessionId);
       // Store card state
       const now = Date.now();
       this.activeCards.set(cardKey, {
@@ -982,7 +988,16 @@ export class FeishuAdapter extends BaseChannelAdapter {
 
       const deliverTextSeparately = shouldDeliverFinalTextSeparately(finalText);
       const cardText = deliverTextSeparately ? buildFinalCardTextPreview(finalText) : finalText;
-      const finalCardJson = buildFinalCardJson(cardText, state.taskItems, state.toolCalls, footer, request.status);
+      let finalCardJson = buildFinalCardJson(cardText, state.taskItems, state.toolCalls, footer, request.status);
+      const address = { channelType: this.channelType, chatId: state.chatId };
+      const sessionId = sessionForMessage(address, state.messageId);
+      if (sessionId) {
+        const card = JSON.parse(finalCardJson);
+        const session = getBridgeContext().store.getSession(sessionId);
+        const actions = JSON.parse(buildActionCard('', sessionResultButtons(address, sessionId), state.chatId));
+        card.body.elements.push({ tag: 'markdown', content: `会话：${(session?.name || '未命名会话').replace(/[\r\n]/g, ' ')} · 直接回复本消息即可继续` }, ...actions.body.elements.slice(1));
+        finalCardJson = JSON.stringify(card);
+      }
 
       state.sequence++;
       await this.withFeishuRequestTimeout(cardKey, 'card.update', () => cardkit.card.update({
@@ -1995,6 +2010,8 @@ export class FeishuAdapter extends BaseChannelAdapter {
       messageId: msg.message_id,
       address,
       text: text.trim(),
+      replyToMessageId: msg.parent_id,
+      rootMessageId: msg.root_id,
       timestamp,
       attachments: attachments.length > 0 ? attachments : undefined,
     };
