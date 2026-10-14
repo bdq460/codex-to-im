@@ -526,7 +526,7 @@ export class FeishuAdapter extends BaseChannelAdapter {
       };
       this.enqueueInboundMessage(callbackMsg);
 
-      return { toast: { type: 'info' as const, content: '已收到，正在处理...' } };
+      return { toast: { type: 'info' as const, content: callbackData.startsWith('session:') ? '会话选择请求已收到，结果将在聊天中确认' : '已收到，正在处理...' } };
     } catch (err) {
       console.error('[feishu-adapter] Card action handler error:', err instanceof Error ? err.message : err);
       return FALLBACK_TOAST;
@@ -995,7 +995,7 @@ export class FeishuAdapter extends BaseChannelAdapter {
         const card = JSON.parse(finalCardJson);
         const session = getBridgeContext().store.getSession(sessionId);
         const actions = JSON.parse(buildActionCard('', sessionResultButtons(address, sessionId), state.chatId));
-        card.body.elements.push({ tag: 'markdown', content: `会话：${(session?.name || '未命名会话').replace(/[\r\n]/g, ' ')} · 直接回复本消息即可继续` }, ...actions.body.elements.slice(1));
+        card.body.elements.push({ tag: 'markdown', content: `会话：${(session?.name || '未命名会话').replace(/[\r\n]/g, ' ')} · 引用回复本消息可进入此会话` }, ...actions.body.elements.slice(1));
         finalCardJson = JSON.stringify(card);
       }
 

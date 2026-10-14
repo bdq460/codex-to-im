@@ -18,7 +18,7 @@ function usableSession(id: string) {
   if (session.thread_origin === 'desktop' && !getDesktopSessionByThreadIdSafe(session.desktop_thread_id || session.sdk_session_id || '', 'message reply')) return null;
   return session;
 }
-async function selectSession(adapter: BaseChannelAdapter, msg: InboundMessage, id: string, deps: Dependencies): Promise<boolean> {
+async function selectSession(adapter: BaseChannelAdapter, msg: InboundMessage, id: string, deps: Dependencies, confirmSelection = false, hasPendingMessage = false): Promise<boolean> {
   const { store } = getBridgeContext();
   const session = usableSession(id);
   if (!session) return false;
@@ -27,9 +27,17 @@ async function selectSession(adapter: BaseChannelAdapter, msg: InboundMessage, i
     await deliverBridgeNotice(adapter, msg.address, '当前会话正在执行任务，暂时不能切换。完成后再回复这条消息，或发送 /stop。');
     return false;
   }
-  const binding = router.bindToSession(msg.address, id);
-  if (!binding) return false;
-  if (current?.codepilotSessionId !== id) await deliverBridgeNotice(adapter, msg.address, `已进入「${session.name || '未命名会话'}」。`);
+  const changed = current?.codepilotSessionId !== id;
+  if (changed && !router.bindToSession(msg.address, id)) {
+    await deliverBridgeNotice(adapter, msg.address, '未能切换会话，请发送 /t 重新选择。');
+    return false;
+  }
+  if (changed || confirmSelection) {
+    const title = (session.name || '未命名会话').replace(/[\r\n]/g, ' ');
+    const notice = await deliverBridgeNotice(adapter, msg.address,
+      `${changed ? '已切换到' : '当前已是'}「${title}」。\n${hasPendingMessage ? '之前保留的消息将继续执行。' : '下一条普通消息将发送到此会话；选择本身不会启动任务。'}引用其它结果回复会切换到其所属会话。`);
+    if (!notice.ok) throw new Error(notice.error || '会话选择结果发送失败');
+  }
   return true;
 }
 export async function handleSessionAction(adapter: BaseChannelAdapter, msg: InboundMessage, deps: Dependencies): Promise<void> {
@@ -60,7 +68,7 @@ export async function handleSessionAction(adapter: BaseChannelAdapter, msg: Inbo
   if (action.pendingId && !pending) return;
   let selected = false;
   try {
-    if (action.kind === 'resume') selected = await selectSession(adapter, msg, action.sessionId, deps);
+    if (action.kind === 'resume') selected = await selectSession(adapter, msg, action.sessionId, deps, true, !!pending);
     else {
       await deps.command(adapter, { ...msg, messageId: msg.callbackMessageId || msg.messageId }, action.kind === 'new' ? newSessionCommand() : `/thread ${action.threadId}`);
       const after = store.getChannelBinding(msg.address.channelType, msg.address.chatId);

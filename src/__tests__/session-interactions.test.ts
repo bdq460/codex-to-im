@@ -35,8 +35,8 @@ describe('message-driven sessions', () => {
       router.bindToSession(f.address, later.id);
       assert.equal(await a.finalizeCard(f.address.chatId, 'completed', '完成', streamKey), true);
       assert.equal(sessionForMessage(f.address, `${kind}-result`), original.id);
-      assert.match(JSON.stringify(updated), /继续此会话/); assert.match(JSON.stringify(updated), /原会话/);
-      const callback = updated.body.elements.flatMap((e: any) => e.columns || []).flatMap((c: any) => c.elements || []).find((b: any) => b.text?.content === '继续此会话').value.callback_data;
+      assert.match(JSON.stringify(updated), /设为当前会话/); assert.match(JSON.stringify(updated), /原会话/);
+      const callback = updated.body.elements.flatMap((e: any) => e.columns || []).flatMap((c: any) => c.elements || []).find((b: any) => b.text?.content === '设为当前会话').value.callback_data;
       assert.equal((decodeSessionAction(callback, f.address) as any).sessionId, original.id);
     });
   }
@@ -72,6 +72,27 @@ describe('message-driven sessions', () => {
     assert.equal(await routeSessionReply(f.adapter, m, f.deps), true);
     assert.equal(f.store.getChannelBinding(f.address.channelType, f.address.chatId)?.codepilotSessionId, a.id);
   });
+  it('explicit same-session selection confirms without binding write or model execution', async () => {
+    const f=setup();const a=f.store.createSession('当前会话','','','/tmp');router.bindToSession(f.address,a.id);
+    const original=f.store.getChannelBinding(f.address.channelType,f.address.chatId);
+    await handleSessionAction(f.adapter,{...f.msg(''),callbackData:encodeSessionAction(f.address,{kind:'resume',sessionId:a.id})},f.deps);
+    assert.match(f.sent.at(-1).text,/当前已是「当前会话」/);assert.match(f.sent.at(-1).text,/不会启动任务/);
+    assert.deepEqual(f.store.getChannelBinding(f.address.channelType,f.address.chatId),original);assert.equal(f.replays.length,0);
+  });
+  it('explicit selection confirms changed target; same-session quoted replies remain quiet', async () => {
+    const f=setup();const a=f.store.createSession('A','','','/tmp');const b=f.store.createSession('B','','','/tmp');router.bindToSession(f.address,b.id);
+    await handleSessionAction(f.adapter,{...f.msg(''),callbackData:encodeSessionAction(f.address,{kind:'resume',sessionId:a.id})},f.deps);
+    assert.match(f.sent.at(-1).text,/已切换到「A」/);assert.equal(f.replays.length,0);
+    rememberSessionMessage(f.address,'card-A',a.id);const count=f.sent.length;
+    assert.equal(await routeSessionReply(f.adapter,f.msg('继续','card-A'),f.deps),true);assert.equal(f.sent.length,count);
+  });
+  it('Feishu action acknowledgement does not claim selection succeeded', async () => {
+    const f=setup();const a:any=new FeishuAdapter({id:f.address.channelType,provider:'feishu',alias:'test',enabled:true,config:{appId:'test',appSecret:'test'}});
+    a.isAuthorized=()=>true;const queued:any[]=[];a.enqueueInboundMessage=(m:any)=>queued.push(m);
+    const s=f.store.createSession('A','','','/tmp');
+    const result=await a.handleCardAction({action:{value:{callback_data:encodeSessionAction(f.address,{kind:'resume',sessionId:s.id})}},context:{open_chat_id:f.address.chatId,open_message_id:'result'},operator:{open_id:'u1'}});
+    assert.match(result.toast.content,/请求已收到/);assert.doesNotMatch(result.toast.content,/正在处理|已切换/);assert.equal(queued.length,1);
+  });
   it('unknown/deleted replied sessions preserve input instead of executing in current session', async () => {
     const f = setup(); const b = f.store.createSession('B', '', '', '/tmp'); router.bindToSession(f.address, b.id);
     const m = f.msg('不能发错', 'unknown');
@@ -86,7 +107,7 @@ describe('message-driven sessions', () => {
     const pendingId = savePendingMessage(m);
     const click = { ...f.msg(''), callbackData: encodeSessionAction(f.address, { kind: 'resume', sessionId: s.id, pendingId }) };
     await Promise.all([handleSessionAction(f.adapter, click, f.deps), handleSessionAction(f.adapter, click, f.deps)]);
-    assert.equal(f.replays.length, 1); assert.equal(f.replays[0].text, m.text); assert.deepEqual(f.replays[0].attachments, m.attachments);
+    assert.equal(f.replays.length, 1); assert.ok(f.sent.some(s=>/之前保留的消息将继续执行/.test(s.text))); assert.equal(f.replays[0].text, m.text); assert.deepEqual(f.replays[0].attachments, m.attachments);
     assert.equal(getPendingMessage(f.address, pendingId)?.status, 'done');
     await handleSessionAction(f.adapter, click, f.deps); assert.equal(f.replays.length, 1);
   });
@@ -119,7 +140,7 @@ describe('message-driven sessions', () => {
   it('normal fallback responses render both actions and persist their session', async () => {
     const f = setup(); const s = f.store.createSession('A', '', '', '/tmp');
     const result = await deliverTextResponse(f.adapter, f.address, '完成', s.id);
-    assert.deepEqual(f.sent[0].inlineButtons.flat().map((b: any) => b.text), ['继续此会话', '切换会话']);
+    assert.deepEqual(f.sent[0].inlineButtons.flat().map((b: any) => b.text), ['设为当前会话', '选择其它会话']);
     assert.equal(sessionForMessage(f.address, result.messageId!), s.id);
   });
   it('includes formal IM sessions in recent activity order and excludes drafts', () => {

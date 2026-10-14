@@ -42,7 +42,7 @@ export function buildSessionPicker(address: ChannelAddress, sessions: Array<{ th
   const rows = sessions.slice(offset, offset + (options.recent ? 3 : PAGE_SIZE));
   const text = [
     options.unbound ? '**当前未进入会话**' : '**选择会话**',
-    options.unbound ? '这条消息尚未执行。选择或新建会话后会自动继续，无需重发。' : '点击会话按钮即可在本聊天继续。',
+    options.unbound ? '这条消息尚未执行。选择或新建会话后会自动继续，无需重发。' : '选择后，本聊天的下一条普通消息会发送到该会话；选择本身不会启动任务。',
     ...rows.map((s, i) => `${offset + i + 1}. ${s.title.replace(/[\r\n]/g, ' ').slice(0, 100)}\n   项目：${path.basename(s.cwd)}`),
     rows.length ? `显示 ${offset + 1}–${offset + rows.length}，共 ${sessions.length} 条。` : '暂时没有可选会话，可以新建一个。',
     '直接回复结果消息即可继续对应会话；发送 `/t` 可随时切换。',
@@ -79,7 +79,7 @@ export function selectableSessions() {
 }
 export function sessionResultButtons(address: ChannelAddress, sessionId: string): InlineButton[][] {
   return [[
-    { text: '继续此会话', callbackData: encodeSessionAction(address, { kind: 'resume', sessionId }) },
-    { text: '切换会话', callbackData: encodeSessionAction(address, { kind: 'list', offset: 0 }) },
+    { text: '设为当前会话', callbackData: encodeSessionAction(address, { kind: 'resume', sessionId }) },
+    { text: '选择其它会话', callbackData: encodeSessionAction(address, { kind: 'list', offset: 0 }) },
   ]];
 }
