@@ -1,3 +1,7 @@
+import { RUNTIME_CONTROL_SCRIPT } from './ui-runtime-controls.js';
+import { FEISHU_REGISTRATION_SCRIPT } from './ui-feishu-registration.js';
+import { FeishuRegistration } from './feishu-registration.js';
+import { BridgeOperationController } from './ui-operation.js';
 import http, { type IncomingMessage, type ServerResponse } from 'node:http';
 import crypto from 'node:crypto';
 import net from 'node:net';
@@ -62,6 +66,8 @@ import {
   readJsonBody,
 } from './ui-http-security.js';
 
+const bridgeOperations = new BridgeOperationController();
+const feishuRegistration = new FeishuRegistration();
 let port = 4781;
 const serverStartTime = new Date().toISOString();
 const AUTH_COOKIE_NAME = 'cti_ui_auth';
@@ -2226,7 +2232,7 @@ function renderHtml(): string {
               <div class="panel-header">
                 <div>
                   <h2>运行控制</h2>
-                  <p>保存配置后，可以直接在这里启停桥接服务或刷新整体状态。</p>
+                  <p>按钮随服务状态变化。操作期间请等待完成；启动与重启使用已保存的配置。</p>
                 </div>
               </div>
               <div class="actions">
@@ -2394,7 +2400,7 @@ function renderHtml(): string {
                   <select id="codexReasoningEffort"></select>
                 </label>
               </div>
-              <div class="small">未绑定的 IM 聊天会先进入临时草稿线程（等同 <code>/t 0</code>）；“默认工作空间”只用于 <code>/new proj1</code> 这类相对项目名。留空时会按当前系统自动回退到 <code>~/cx2im</code>。默认模型候选项来自按需读取的 Codex 模型缓存：隐藏模型不会展示，CLI only 模型会标成“仅 IM / CLI”。留空则继续跟随 Codex 当前默认模型。文件系统权限是全局默认值，思考级别可在 IM 会话里再单独覆盖。上次响应距今配置只影响飞书长任务底部“上次响应距今 X”的出现时机。</div>
+              <div class="small">飞书聊天未进入会话时会询问新建或选择已有会话，选择后自动继续原消息；“默认工作空间”只用于 <code>/new proj1</code> 这类相对项目名。留空时会按当前系统自动回退到 <code>~/cx2im</code>。默认模型候选项来自按需读取的 Codex 模型缓存：隐藏模型不会展示，CLI only 模型会标成“仅 IM / CLI”。留空则继续跟随 Codex 当前默认模型。文件系统权限是全局默认值，思考级别可在 IM 会话里再单独覆盖。上次响应距今配置只影响飞书长任务底部“上次响应距今 X”的出现时机。</div>
               <div class="small">当前需要重启 Bridge 的配置：<code>Runtime</code>、<code>允许在未信任 Git 目录运行 Codex</code>。通道实例的接入配置请在“通道”页维护。</div>
               <div class="checkbox-row">
                 <label class="checkbox"><input id="codexSkipGitRepoCheck" type="checkbox" checked /> 允许在未信任 Git 目录运行 Codex</label>
@@ -2558,7 +2564,9 @@ function renderHtml(): string {
     </div>
     <div id="globalMessageHost" class="global-message-host" aria-live="polite"></div>
 
-    <script>
+    <style>[hidden]{display:none!important}#feishuRegistrationDialog{border:1px solid #dde2eb;border-radius:14px;max-width:420px;padding:24px}#feishuRegistrationDialog::backdrop{background:#10182855}#feishuRegistrationQr{text-align:center;margin:16px 0}</style>
+<dialog id="feishuRegistrationDialog" aria-labelledby="feishuRegistrationTitle"><h2 id="feishuRegistrationTitle">扫码添加飞书机器人</h2><p>用飞书扫码，在手机上确认创建与授权。凭据会自动保存到本机。</p><div id="feishuRegistrationQr"></div><p id="feishuRegistrationStatus" role="status"></p><a id="feishuRegistrationLink" hidden target="_blank" rel="noopener noreferrer">在飞书授权页面继续</a><p class="small">创建机器人可能需要企业管理员批准。已有机器人可关闭后手动填写凭据。</p><button id="feishuRegistrationRetry" type="button">重新生成二维码</button><button id="feishuRegistrationClose" type="button">关闭</button></dialog>
+<script>
       const state = {
         config: null,
         availableModels: [],
@@ -3076,6 +3084,7 @@ function renderHtml(): string {
 
       function formatChannelRuntimeLabel(channel) {
         const label = channelDisplayLabel(channel);
+        if (String(channel.id || '').startsWith('__draft__:')) return '尚未添加。请扫码创建机器人，或填写已有机器人凭据后保存。';
         if (channel.enabled === false) {
           return label + '已停用。';
         }
@@ -3091,6 +3100,7 @@ function renderHtml(): string {
 
       function emptyBindingText(channel) {
         const label = channelDisplayLabel(channel);
+        if (String(channel.id || '').startsWith('__draft__:')) return '尚未添加。请扫码创建机器人，或填写已有机器人凭据后保存。';
         if (channel.enabled === false) {
           return label + '已停用。启用后才会创建聊天绑定。';
         }
@@ -3348,7 +3358,7 @@ function renderHtml(): string {
           const adapter = getAdapterStatus(channel.id);
           const active = channel.id === state.activeChannelId;
           const bindingCount = bindingsForChannel(channel.id).length;
-          const statusText = channel.enabled === false
+          const statusText = String(channel.id || '').startsWith('__draft__:') ? '待添加' : channel.enabled === false
             ? '已停用'
             : adapter && adapter.running
               ? '运行中'
@@ -3423,6 +3433,8 @@ function renderHtml(): string {
           ? ''
             + '<div class="editor-section">'
             +   '<p class="editor-section-title">连接配置</p>'
+            +   '<button type="button" data-action="channel-feishu-scan">扫码添加飞书机器人</button>'
+            +   '<p class="small">推荐扫码创建新机器人。已有机器人可在下方手动填写凭据；扫码不会替换原通道。</p>'
             +   '<div class="field-row">'
             +     '<label>App ID<input id="channelAppId" value="' + escapeHtml(feishu.appId || '') + '" /></label>'
             +     '<label>App Secret<input id="channelAppSecret" value="' + escapeHtml(feishu.appSecret || '') + '" /></label>'
@@ -3593,17 +3605,21 @@ function renderHtml(): string {
         return data;
       }
 
+      ${RUNTIME_CONTROL_SCRIPT}
+      ${FEISHU_REGISTRATION_SCRIPT}
+
       async function loadStatus() {
         const status = await api('/api/status');
         const config = await api('/api/config');
         state.uiAccess = status.uiAccess || null;
         state.bridgeStatus = status.bridge || null;
+        state.bridgeOperation = status.bridgeOperation || null;
         state.autostartStatus = status.autostart || null;
         state.weixinAccounts = status.weixin && Array.isArray(status.weixin.linkedAccounts) ? status.weixin.linkedAccounts : [];
         fillForm(config);
         const adapters = adapterStatuses();
         const runningAdapters = adapters.filter((item) => item.running);
-        document.getElementById('bridgeStatus').textContent = status.bridge.running ? '运行中' : '已停止';
+        renderRuntimeControls();
         document.getElementById('bridgeStatusMeta').textContent = adapters.length
           ? ('运行实例 ' + runningAdapters.length + ' / ' + adapters.length)
           : '当前没有通道实例在运行';
@@ -3893,6 +3909,7 @@ function renderHtml(): string {
         if (!channel) return;
 
         try {
+          if (target.dataset.action === 'channel-feishu-scan') { await startFeishuRegistration(); return; }
           if (target.dataset.action === 'channel-save') {
             await saveChannel(channel);
             showMessage('channelMessage', 'success', '通道已保存。');
@@ -3997,44 +4014,13 @@ function renderHtml(): string {
         }
       });
 
-      document.getElementById('startBridgeBtn').addEventListener('click', async () => {
-        try {
-          await saveConfig();
-          const result = await api('/api/bridge/start', { method: 'POST' });
-          showMessage('opsMessage', 'success', '桥接服务已启动。PID: ' + (result.status.pid || '-'));
-          await loadStatus();
-          await loadBindings();
-          await loadLogs();
-        } catch (error) {
-          showMessage('opsMessage', 'error', error.message);
-          await loadLogs();
-        }
-      });
-
-      document.getElementById('stopBridgeBtn').addEventListener('click', async () => {
-        try {
-          await api('/api/bridge/stop', { method: 'POST' });
-          showMessage('opsMessage', 'success', '桥接服务已停止。');
-          await loadStatus();
-          await loadBindings();
-        } catch (error) {
-          showMessage('opsMessage', 'error', error.message);
-        }
-      });
-
-      document.getElementById('restartBridgeBtn').addEventListener('click', async () => {
-        try {
-          await saveConfig();
-          const result = await api('/api/bridge/restart', { method: 'POST' });
-          showMessage('opsMessage', 'success', '桥接服务已重启。PID: ' + (result.status.pid || '-'));
-          await loadStatus();
-          await loadBindings();
-          await loadLogs();
-        } catch (error) {
-          showMessage('opsMessage', 'error', error.message);
-          await loadLogs();
-        }
-      });
+      for (const action of ['start', 'stop', 'restart']) {
+        document.getElementById(action + 'BridgeBtn').addEventListener('click', () => performBridgeOperation(action));
+      }
+      window.setInterval(() => { void refreshRuntimeStatus().catch(() => { state.bridgeStatus = null; renderRuntimeControls(); }); }, 3000);
+      document.getElementById('feishuRegistrationClose').addEventListener('click', () => void closeFeishuRegistration());
+      document.getElementById('feishuRegistrationRetry').addEventListener('click', () => void startFeishuRegistration());
+      document.getElementById('feishuRegistrationDialog').addEventListener('cancel', (event) => { event.preventDefault(); void closeFeishuRegistration(); });
 
       document.getElementById('refreshBtn').addEventListener('click', async () => {
         try {
@@ -4283,6 +4269,7 @@ const server = http.createServer(async (request, response) => {
     if (request.method === 'GET' && url.pathname === '/api/status') {
       json(response, 200, {
         bridge: getBridgeStatus(),
+        bridgeOperation: bridgeOperations.current,
         autostart: await getBridgeAutostartStatus(),
         ui: getUiServerStatus(),
         uiAccess: buildUiAccessInfo(port, config, request),
@@ -4428,6 +4415,28 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
+    if (request.method === 'POST' && url.pathname === '/api/channels/feishu-registration/start') {
+      const payload = await readJsonBody<Record<string, unknown>>(request);
+      const alias = normalizeChannelAlias(asString(payload.alias), 'feishu');
+      const site = normalizeFeishuSite(asString(payload.site));
+      const session = await feishuRegistration.begin({ alias, site, save: async (credentials) => {
+        const latest = loadConfig();
+        if ((latest.channels || []).some(channel => channel.provider === 'feishu' && (channel.config as FeishuChannelConfig).appId === credentials.appId)) return;
+        const merged = mergeChannelInstance({ provider: 'feishu', alias, enabled: true, ...credentials,
+          allowedUsers: credentials.ownerId || '', streamingEnabled: true, feedbackMarkdownEnabled: true }, latest);
+        saveConfig(merged.config);
+      } });
+      json(response, 200, { session }); return;
+    }
+    if (request.method === 'POST' && (url.pathname === '/api/channels/feishu-registration/poll' || url.pathname === '/api/channels/feishu-registration/cancel')) {
+      const payload = await readJsonBody<Record<string, unknown>>(request);
+      const id = asString(payload.sessionId) || '';
+      if (!id) throw new HttpRequestError(400, 'sessionId 不能为空。');
+      if (url.pathname.endsWith('/cancel')) { feishuRegistration.cancel(id); json(response, 200, { ok: true }); return; }
+      const session = await feishuRegistration.poll(id);
+      json(response, 200, { session, ...(session.status === 'confirmed' ? { config: configToPayload(loadConfig()) } : {}) }); return;
+    }
+
     if (request.method === 'POST' && url.pathname === '/api/channels/weixin-login/start') {
       const payload = await readJsonBody<Record<string, unknown>>(request);
       const channelId = asString(payload.channelId);
@@ -4501,19 +4510,19 @@ const server = http.createServer(async (request, response) => {
     }
 
     if (request.method === 'POST' && url.pathname === '/api/bridge/start') {
-      const status = await startBridge();
+      const status = await bridgeOperations.run('start', () => startBridge());
       json(response, 200, { ok: true, status });
       return;
     }
 
     if (request.method === 'POST' && url.pathname === '/api/bridge/stop') {
-      const status = await stopBridge();
+      const status = await bridgeOperations.run('stop', () => stopBridge());
       json(response, 200, { ok: true, status });
       return;
     }
 
     if (request.method === 'POST' && url.pathname === '/api/bridge/restart') {
-      const status = await restartBridge();
+      const status = await bridgeOperations.run('restart', () => restartBridge());
       json(response, 200, { ok: true, status });
       return;
     }

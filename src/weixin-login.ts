@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -677,10 +678,11 @@ export async function runWeixinLogin(config: WeixinChannelConfig = {}): Promise<
   }
 }
 
-const isMainModule = (() => {
-  const entry = process.argv[1];
-  return !!entry && path.resolve(entry) === path.resolve(new URL(import.meta.url).pathname);
-})();
+export function isWeixinLoginCliEntrypoint(entry: string | undefined, moduleUrl: string): boolean {
+  return !!entry && /^weixin-login\.(?:ts|js|mjs)$/.test(path.basename(entry))
+    && path.resolve(entry) === path.resolve(fileURLToPath(moduleUrl));
+}
+const isMainModule = isWeixinLoginCliEntrypoint(process.argv[1], import.meta.url);
 
 if (isMainModule) {
   runWeixinLogin().catch((err) => {
