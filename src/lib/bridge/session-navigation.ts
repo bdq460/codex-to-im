@@ -98,6 +98,5 @@ export function sessionResultButtons(address: ChannelAddress, sessionId: string)
   return [[
     ...(current === sessionId ? [] : [{ text: '绑定此会话', callbackData: encodeSessionAction(address, { kind: 'resume', sessionId }) }]),
     { text: isNotificationSubscribed(getBridgeContext().store,address,sessionId) ? '取消订阅' : '开启订阅', callbackData: encodeSessionAction(address, {kind:'subscribe',threadId:sessionId,enabled:!isNotificationSubscribed(getBridgeContext().store,address,sessionId)}) },
-    { text: '选择其它会话', callbackData: encodeSessionAction(address, { kind: 'list', offset: 0, view: 'recent' }) },
   ]];
 }

@@ -44,7 +44,7 @@ test('explicit subscription is idempotent, scoped, survives unbinding and has in
   assert.equal(listChatSubscriptions(f.store,other).length,1);
 });
 test('current button is hidden; picker groups context with independent selection and subscription buttons',()=>{
-  const f=fixture();assert.deepEqual(sessionResultButtons(f.address,f.a.id).flat().map(b=>b.text),['取消订阅','选择其它会话']);
+  const f=fixture();assert.deepEqual(sessionResultButtons(f.address,f.a.id).flat().map(b=>b.text),['取消订阅']);
   assert.ok(sessionResultButtons(f.address,f.b.id).flat().some(b=>b.text==='绑定此会话'));
   const picker=buildSessionPicker(f.address,[{threadId:f.a.id,sessionId:f.a.id,title:'A',cwd:'/tmp/a'},{threadId:f.b.id,sessionId:f.b.id,title:'B',cwd:'/tmp/b'}],{view:'all'});
   assert.match(picker.sections[0].text,/当前绑定会话/);assert.deepEqual(picker.sections[0].buttons.map(b=>b.text),['取消订阅']);

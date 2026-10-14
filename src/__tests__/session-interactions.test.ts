@@ -137,10 +137,18 @@ describe('message-driven sessions', () => {
     const action = decodeSessionAction(button.callbackData, f.address);
     assert.equal(action?.pendingId, m.messageId); assert.equal(getPendingMessage(f.address, m.messageId)?.message.text, m.text);
   });
+  it('Feishu menu label opens the session picker without starting a model turn', async () => {
+    const f = setup(); let calls = 0;
+    initBridgeContext({ store: f.store, llm: { streamChat: () => { calls++; return new ReadableStream(); } }, permissions: { resolvePendingPermission: () => false }, lifecycle: {} });
+    await _testOnly.handleMessage(f.adapter, f.msg('绑定其他会话'));
+    assert.equal(calls, 0);
+    assert.match(f.sent[0].text, /会话中心/);
+    assert.equal(f.sent[0].sessionPicker?.recent, true);
+  });
   it('normal fallback responses render both actions and persist their session', async () => {
     const f = setup(); const s = f.store.createSession('A', '', '', '/tmp');
     const result = await deliverTextResponse(f.adapter, f.address, '完成', s.id);
-    assert.deepEqual(f.sent[0].inlineButtons.flat().map((b: any) => b.text), ['绑定此会话', '取消订阅', '选择其它会话']);
+    assert.deepEqual(f.sent[0].inlineButtons.flat().map((b: any) => b.text), ['绑定此会话', '取消订阅']);
     assert.equal(sessionForMessage(f.address, result.messageId!), s.id);
   });
   it('includes formal IM sessions in recent activity order and excludes drafts', () => {

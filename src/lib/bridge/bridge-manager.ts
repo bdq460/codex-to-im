@@ -1021,13 +1021,14 @@ async function handleMessage(
   }
 
   // Check for IM commands (before sanitization — commands are validated individually)
-  if (rawText.startsWith('/')) {
-    const parts = rawText.split(/\s+/);
+  if (rawText.startsWith('/') || (adapter.provider === 'feishu' && rawText === '绑定其他会话')) {
+    const commandText = rawText === '绑定其他会话' ? '/threads' : rawText;
+    const parts = commandText.split(/\s+/);
     const rawCommand = parts[0].split('@')[0].toLowerCase();
     const args = parts.slice(1).join(' ').trim();
     const resolvedCommand = resolveCommandAlias(rawCommand, args);
     try {
-      await handleCommand(adapter, msg, rawText);
+      await handleCommand(adapter, msg, commandText);
     } catch (error) {
       console.error(`[bridge-manager] Command failed: ${resolvedCommand}`, error);
       await deliverBridgeNotice(adapter, msg.address, toUserVisibleCommandError(resolvedCommand, error), {
