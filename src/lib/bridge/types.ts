@@ -73,6 +73,9 @@ export interface OutboundMessage {
   attachments?: OutboundAttachment[];
   /** Inline keyboard buttons */
   inlineButtons?: InlineButton[][];
+  sections?: Array<{ text: string; buttons: InlineButton[] }>;
+  sessionPicker?: { unbound?: boolean; offset?: number; recent?: boolean; pendingId?: string; view?: 'recent' | 'all' | 'subscribed' };
+  resultSessionId?: string;
   /** If replying to a specific message */
   replyToMessageId?: string;
 }

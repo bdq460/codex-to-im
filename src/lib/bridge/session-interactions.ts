@@ -1,3 +1,5 @@
+import { setNotificationSubscription } from './notification-subscriptions.js';
+import { ensureDesktopBridgeSession } from '../../session-bindings.js';
 import type { InboundMessage } from './types.js';
 import type { BaseChannelAdapter } from './channel-adapter.js';
 import { getBridgeContext } from './context.js';
@@ -38,6 +40,7 @@ async function selectSession(adapter: BaseChannelAdapter, msg: InboundMessage, i
       `${changed ? '已切换到' : '当前已是'}「${title}」。\n${hasPendingMessage ? '之前保留的消息将继续执行。' : '下一条普通消息将发送到此会话；选择本身不会启动任务。'}引用其它结果回复会切换到其所属会话。`);
     if (!notice.ok) throw new Error(notice.error || '会话选择结果发送失败');
   }
+  if (changed || confirmSelection) await adapter.refreshSessionCards?.(msg.address);
   return true;
 }
 export async function handleSessionAction(adapter: BaseChannelAdapter, msg: InboundMessage, deps: Dependencies): Promise<void> {
@@ -47,7 +50,21 @@ export async function handleSessionAction(adapter: BaseChannelAdapter, msg: Inbo
     await deliverBridgeNotice(adapter, msg.address, '入口已失效，请发送 /t 重新选择。原消息不会自动执行。');
     return;
   }
-  if (action.kind === 'list') { await sendSessionPicker(adapter, msg.address, { offset: action.offset, pendingId: action.pendingId }); return; }
+  if (action.kind === 'list') { await sendSessionPicker(adapter, msg.address, { offset: action.offset, view: action.view || 'recent', pendingId: action.pendingId }); return; }
+  if (action.kind === 'subscribe') {
+    const { store } = getBridgeContext();
+    let session = store.getSession(action.threadId) || store.findSessionBySdkSessionId(action.threadId);
+    if (!session && action.enabled) {
+      const desktop = getDesktopSessionByThreadIdSafe(action.threadId, 'notification subscription');
+      if (desktop) session = ensureDesktopBridgeSession(store, action.threadId, { workingDirectory: desktop.cwd, displayName: desktop.title });
+    }
+    if (!session || (action.enabled && !usableSession(session.id))) { await deliverBridgeNotice(adapter, msg.address, '会话不可用，请刷新列表。'); return; }
+    setNotificationSubscription(store, msg.address, session.id, action.enabled);
+    await deliverBridgeNotice(adapter, msg.address, `${action.enabled ? '已订阅' : '已取消订阅'}「${session.name}」的通知。当前发送会话保持不变。`);
+    await adapter.refreshSessionCards?.(msg.address);
+    if (!adapter.refreshSessionCards) await sendSessionPicker(adapter, msg.address, { offset: action.offset, view: action.view, pendingId: action.pendingId });
+    return;
+  }
   if (action.pendingId && getPendingMessage(msg.address, action.pendingId)?.status !== 'waiting') {
     await deliverBridgeNotice(adapter, msg.address, '这条消息已处理、正在执行或已过期，请勿重复点击。'); return;
   }
@@ -74,6 +91,7 @@ export async function handleSessionAction(adapter: BaseChannelAdapter, msg: Inbo
       const after = store.getChannelBinding(msg.address.channelType, msg.address.chatId);
       selected = !!after && (action.kind === 'new' ? after.codepilotSessionId !== current?.codepilotSessionId : (store.getSession(after.codepilotSessionId)?.desktop_thread_id || after.sdkSessionId) === action.threadId);
     }
+    if (selected && action.kind !== 'resume') await adapter.refreshSessionCards?.(msg.address);
     if (!selected) { if (action.pendingId) releasePendingMessage(msg.address, action.pendingId); return; }
   } catch (error) { if (action.pendingId) releasePendingMessage(msg.address, action.pendingId); throw error; }
   if (pending && action.pendingId) {

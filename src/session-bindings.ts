@@ -1,3 +1,4 @@
+import { initializeChatSubscriptions } from './lib/bridge/notification-subscriptions.js';
 import path from 'node:path';
 
 import type { BridgeSession, BridgeStore } from './lib/bridge/host.js';
@@ -166,6 +167,7 @@ export function bindStoreToSession(
       sdkSessionId: getCodexThreadId(session) || getExplicitDesktopThreadId(session),
     },
   );
+  initializeChatSubscriptions(store, { channelType, chatId });
   const meta = resolveChannelMeta(channelType);
   const sdkSessionId = getBindingResumeThreadId(session);
 
@@ -196,54 +198,22 @@ export function bindStoreToSdkSession(
     { channelType, chatId },
     { sdkSessionId },
   );
+  initializeChatSubscriptions(store, { channelType, chatId });
   const meta = resolveChannelMeta(channelType);
 
-  const existing = store.findSessionBySdkSessionId(sdkSessionId);
-  if (existing) {
-      markSessionAsDesktopBacked(store, existing.id, sdkSessionId);
-      return store.upsertChannelBinding({
-        channelType,
-        channelProvider: meta.provider,
-        channelAlias: meta.alias,
-        chatId,
-        chatUserId: opts?.chatUserId,
-        chatDisplayName: opts?.chatDisplayName,
-        codepilotSessionId: existing.id,
-        sdkSessionId,
-        workingDirectory: opts?.workingDirectory || existing.working_directory,
-        model: opts?.model || existing.model,
-        mode: getSessionMode(store, existing),
-      });
-  }
+  const session = ensureDesktopBridgeSession(store, sdkSessionId, opts);
+  return store.upsertChannelBinding({ channelType, channelProvider: meta.provider, channelAlias: meta.alias, chatId,
+    chatUserId: opts?.chatUserId, chatDisplayName: opts?.chatDisplayName, codepilotSessionId: session.id,
+    sdkSessionId, workingDirectory: opts?.workingDirectory || session.working_directory, model: opts?.model || session.model, mode: getSessionMode(store, session) });
+}
 
-  const workingDirectory = opts?.workingDirectory
-    || '';
-  const model = opts?.model || store.getSetting('bridge_default_model') || '';
-  const baseName = opts?.displayName
-    || (workingDirectory ? path.basename(workingDirectory) : sdkSessionId.slice(0, 8));
-
-  const session = store.createSession(
-    `Desktop: ${baseName}`,
-    model,
-    undefined,
-    workingDirectory,
-    'code',
-  );
-  markSessionAsDesktopBacked(store, session.id, sdkSessionId);
-
-  return store.upsertChannelBinding({
-    channelType,
-    channelProvider: meta.provider,
-    channelAlias: meta.alias,
-    chatId,
-    chatUserId: opts?.chatUserId,
-    chatDisplayName: opts?.chatDisplayName,
-    codepilotSessionId: session.id,
-    sdkSessionId,
-    workingDirectory: workingDirectory || session.working_directory,
-    model: model || session.model,
-    mode: getSessionMode(store, session),
-  });
+export function ensureDesktopBridgeSession(store: BridgeStore, threadId: string, opts?: { workingDirectory?: string; model?: string; displayName?: string }): BridgeSession {
+  const existing = store.findSessionBySdkSessionId(threadId);
+  if (existing) { markSessionAsDesktopBacked(store, existing.id, threadId); return store.getSession(existing.id)!; }
+  const cwd = opts?.workingDirectory || '';
+  const session = store.createSession(`Desktop: ${opts?.displayName || path.basename(cwd) || threadId.slice(0, 8)}`, opts?.model || store.getSetting('bridge_default_model') || '', undefined, cwd, 'code');
+  markSessionAsDesktopBacked(store, session.id, threadId);
+  return store.getSession(session.id)!;
 }
 
 export function listBindingTargetOptions(

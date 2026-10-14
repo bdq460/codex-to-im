@@ -192,6 +192,7 @@ export interface InteractiveTaskState {
 }
 
 export interface RunInteractiveMessageDeps {
+  notifySubscribers?(response: Parameters<typeof deliverFinalResponse>[1]): Promise<void>;
   registerInteractiveTask(task: InteractiveTaskState): void;
   registerBridgeTurn?(turn: ActiveBridgeTurn): void;
   resetMirrorSessionForInteractiveRun(sessionId: string): void;
@@ -654,6 +655,7 @@ export async function runInteractiveMessage(
   let shouldRecordHealthEnd = true;
   let forceStopStarted = false;
 
+  let subscribersNotified = false;
   const deliverFinalPayload = async (
     response: Parameters<typeof deliverFinalResponse>[1],
     options?: Parameters<typeof deliverFinalResponse>[2],
@@ -666,7 +668,15 @@ export async function runInteractiveMessage(
         replyToMessageId: msg.messageId,
         deliverResponse: deps.deliverResponse,
       }, response, options);
-      if (result.ok) return true;
+      if (result.ok) {
+        if (!subscribersNotified && deps.notifySubscribers) {
+          subscribersNotified = true;
+          try {
+            void deps.notifySubscribers(response).catch(error => console.warn('[interactive-message-runner] Subscriber delivery failed:', error instanceof Error ? error.message : String(error)));
+          } catch(error) { console.warn('[interactive-message-runner] Subscriber delivery failed:', error instanceof Error ? error.message : String(error)); }
+        }
+        return true;
+      }
       finalDeliveryError = `最终回复投递失败：${result.error || '未知错误'}`;
     } catch (error) {
       finalDeliveryError = `最终回复投递异常：${error instanceof Error ? error.message : String(error)}`;

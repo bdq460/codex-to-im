@@ -145,6 +145,7 @@ describe('mirror-runtime pending deliveries', () => {
     };
     const store = {
       listChannelBindings: () => bindings,
+      getChannelBinding: () => bindings[0],
       getSession: (sessionId: string) => (sessionId === session.id ? session : null),
       updateSdkSessionId: () => {},
     };
@@ -158,7 +159,7 @@ describe('mirror-runtime pending deliveries', () => {
     const state = {
       running: true,
       adapters: new Map([
-        ['feishu-default', { channelType: 'feishu-default', provider: 'feishu', isRunning: () => false }],
+        ['feishu-default', { channelType: 'feishu-default', provider: 'feishu', isAuthorized: () => true, isRunning: () => false }],
       ]),
       mirrorSubscriptions: new Map(),
       mirrorWakeTimer: null,
@@ -276,6 +277,7 @@ describe('mirror-runtime pending deliveries', () => {
     };
     const store = {
       listChannelBindings: () => bindings,
+      getChannelBinding: () => bindings[0],
       getSession: (sessionId: string) => (sessionId === session.id ? session : null),
       updateSdkSessionId: () => {},
     };
@@ -289,7 +291,7 @@ describe('mirror-runtime pending deliveries', () => {
     const state = {
       running: true,
       adapters: new Map([
-        ['feishu-default', { channelType: 'feishu-default', provider: 'feishu', isRunning: () => false }],
+        ['feishu-default', { channelType: 'feishu-default', provider: 'feishu', isAuthorized: () => true, isRunning: () => false }],
       ]),
       mirrorSubscriptions: new Map(),
       mirrorWakeTimer: null,
@@ -402,6 +404,7 @@ describe('mirror-runtime pending deliveries', () => {
     };
     const store = {
       listChannelBindings: () => bindings,
+      getChannelBinding: () => bindings[0],
       getSession: (sessionId: string) => (sessionId === session.id ? session : null),
       updateSdkSessionId: () => {},
     };
@@ -415,7 +418,7 @@ describe('mirror-runtime pending deliveries', () => {
     const state = {
       running: true,
       adapters: new Map([
-        ['feishu-default', { channelType: 'feishu-default', provider: 'feishu', isRunning: () => false }],
+        ['feishu-default', { channelType: 'feishu-default', provider: 'feishu', isAuthorized: () => true, isRunning: () => false }],
       ]),
       mirrorSubscriptions: new Map(),
       mirrorWakeTimer: null,
@@ -541,6 +544,7 @@ describe('mirror-runtime pending deliveries', () => {
     };
     const store = {
       listChannelBindings: () => bindings,
+      getChannelBinding: () => bindings[0],
       getSession: (sessionId: string) => (sessionId === session.id ? session : null),
       updateSdkSessionId: () => {},
     };
@@ -554,7 +558,7 @@ describe('mirror-runtime pending deliveries', () => {
     const state = {
       running: true,
       adapters: new Map([
-        ['feishu-default', { channelType: 'feishu-default', provider: 'feishu', isRunning: () => false }],
+        ['feishu-default', { channelType: 'feishu-default', provider: 'feishu', isAuthorized: () => true, isRunning: () => false }],
       ]),
       mirrorSubscriptions: new Map(),
       mirrorWakeTimer: null,
@@ -670,6 +674,7 @@ describe('mirror-runtime pending deliveries', () => {
     };
     const store = {
       listChannelBindings: () => bindings,
+      getChannelBinding: () => bindings[0],
       getSession: (sessionId: string) => (sessionId === session.id ? session : null),
       updateSdkSessionId: () => {},
     };
@@ -683,7 +688,7 @@ describe('mirror-runtime pending deliveries', () => {
     const state = {
       running: true,
       adapters: new Map([
-        ['feishu-default', { channelType: 'feishu-default', provider: 'feishu', isRunning: () => false }],
+        ['feishu-default', { channelType: 'feishu-default', provider: 'feishu', isAuthorized: () => true, isRunning: () => false }],
       ]),
       mirrorSubscriptions: new Map(),
       mirrorWakeTimer: null,
@@ -801,6 +806,7 @@ describe('mirror-runtime pending deliveries', () => {
     };
     const store = {
       listChannelBindings: () => bindings,
+      getChannelBinding: () => bindings[0],
       getSession: (sessionId: string) => (sessionId === session.id ? session : null),
       updateSdkSessionId: () => {},
     };
@@ -814,7 +820,7 @@ describe('mirror-runtime pending deliveries', () => {
     const state = {
       running: true,
       adapters: new Map([
-        ['feishu-default', { channelType: 'feishu-default', provider: 'feishu', isRunning: () => false }],
+        ['feishu-default', { channelType: 'feishu-default', provider: 'feishu', isAuthorized: () => true, isRunning: () => false }],
       ]),
       mirrorSubscriptions: new Map(),
       mirrorWakeTimer: null,

@@ -1,5 +1,6 @@
+import { loadSessionCards, saveSessionCards, type SessionCardReference } from '../session-card-cache.js';
 import { rememberSessionMessage, sessionForMessage } from '../session-interaction-store.js';
-import { sessionResultButtons } from '../session-navigation.js';
+import { buildSessionPicker, selectableSessions, sessionResultButtons } from '../session-navigation.js';
 import { buildActionCard } from '../markdown/action-card.js';
 /**
  * Feishu (Lark) Adapter — implements BaseChannelAdapter for Feishu Bot API.
@@ -249,6 +250,48 @@ const MIME_BY_TYPE: Record<string, string> = {
 };
 
 export class FeishuAdapter extends BaseChannelAdapter {
+  private sessionCards = new Map<string, SessionCardReference>();
+  private rememberSessionCard(id: string, card: { chatId: string; message?: OutboundMessage; sessionId?: string; baseJson?: string; cardId?: string; sequence?: number }): void {
+    this.sessionCards.set(id, card);
+    const entries = [...this.sessionCards.entries()].filter(([,v])=>v.chatId===card.chatId);
+    for (const [key] of entries.slice(0, Math.max(0, entries.length-20))) this.sessionCards.delete(key);
+    while(this.sessionCards.size>200) this.sessionCards.delete(this.sessionCards.keys().next().value!);
+    saveSessionCards(this.channelType,this.sessionCards);
+  }
+  private sessionCardRefreshes = new Map<string, Promise<void>>();
+  async refreshSessionCards(address: import('../types.js').ChannelAddress): Promise<void> {
+    const previous = this.sessionCardRefreshes.get(address.chatId) || Promise.resolve();
+    const next = previous.catch(()=>{}).then(()=>this.updateSessionCards(address));
+    this.sessionCardRefreshes.set(address.chatId,next);
+    try { await next; } finally { if (this.sessionCardRefreshes.get(address.chatId)===next) this.sessionCardRefreshes.delete(address.chatId); }
+  }
+  private async updateSessionCards(address: import('../types.js').ChannelAddress): Promise<void> {
+    if (!this.restClient) return;
+    for (const [id, entry] of this.sessionCards) {
+      if (entry.chatId !== address.chatId) continue;
+      try {
+        if (entry.baseJson && entry.cardId && entry.sessionId) {
+          const json = JSON.stringify(this.decorateResultCard(JSON.parse(entry.baseJson), address.chatId, entry.sessionId));
+          entry.sequence = (entry.sequence || 0) + 1;
+          await this.withFeishuRequestTimeout(id, 'card.update:session-state', ()=>this.restClient!.cardkit.v1.card.update({path:{card_id:entry.cardId!},data:{card:{type:'card_json',data:json},sequence:entry.sequence!}}));
+        } else if (entry.message) {
+          const m = entry.message;
+          const picker = m.sessionPicker ? buildSessionPicker(m.address, selectableSessions(), m.sessionPicker) : null;
+          const json = buildActionCard(picker?.text || m.text, picker?.navigationButtons || (m.resultSessionId ? sessionResultButtons(m.address,m.resultSessionId) : m.inlineButtons || []), address.chatId, picker?.sections || m.sections);
+          await this.withFeishuRequestTimeout(id, 'im.message.patch:session-state', ()=>this.restClient!.im.message.patch({path:{message_id:id},data:{content:json}}));
+        }
+      } catch(error) { console.warn('[feishu-adapter] Session card refresh failed:', error instanceof Error ? error.message : String(error)); }
+    }
+    saveSessionCards(this.channelType,this.sessionCards);
+  }
+  private decorateResultCard(card: any, chatId: string, sessionId: string) {
+    const address = {channelType:this.channelType,chatId};
+    const session = getBridgeContext().store.getSession(sessionId);
+    const current = getBridgeContext().store.getChannelBinding(this.channelType,chatId)?.codepilotSessionId===sessionId;
+    const actions = JSON.parse(buildActionCard('',sessionResultButtons(address,sessionId),chatId));
+    card.body.elements.push({tag:'markdown',content:`会话：${(session?.name || '未命名会话').replace(/[\r\n]/g,' ')}${current ? ' · 当前发送会话' : ''} · 引用回复可进入此会话`},...actions.body.elements.slice(1));
+    return card;
+  }
   readonly channelType: ChannelType;
   readonly provider = 'feishu';
   readonly alias?: string;
@@ -285,6 +328,7 @@ export class FeishuAdapter extends BaseChannelAdapter {
   constructor(instance?: AdapterRuntimeInstance) {
     super();
     this.channelType = instance?.id || 'feishu';
+    this.sessionCards = loadSessionCards(this.channelType);
     this.alias = instance?.alias;
     this.channelConfig = (instance?.config || {}) as FeishuChannelConfig;
   }
@@ -989,14 +1033,11 @@ export class FeishuAdapter extends BaseChannelAdapter {
       const deliverTextSeparately = shouldDeliverFinalTextSeparately(finalText);
       const cardText = deliverTextSeparately ? buildFinalCardTextPreview(finalText) : finalText;
       let finalCardJson = buildFinalCardJson(cardText, state.taskItems, state.toolCalls, footer, request.status);
+      const baseCardJson = finalCardJson;
       const address = { channelType: this.channelType, chatId: state.chatId };
       const sessionId = sessionForMessage(address, state.messageId);
       if (sessionId) {
-        const card = JSON.parse(finalCardJson);
-        const session = getBridgeContext().store.getSession(sessionId);
-        const actions = JSON.parse(buildActionCard('', sessionResultButtons(address, sessionId), state.chatId));
-        card.body.elements.push({ tag: 'markdown', content: `会话：${(session?.name || '未命名会话').replace(/[\r\n]/g, ' ')} · 引用回复本消息可进入此会话` }, ...actions.body.elements.slice(1));
-        finalCardJson = JSON.stringify(card);
+        finalCardJson = JSON.stringify(this.decorateResultCard(JSON.parse(finalCardJson), state.chatId, sessionId));
       }
 
       state.sequence++;
@@ -1008,6 +1049,7 @@ export class FeishuAdapter extends BaseChannelAdapter {
         },
       }));
 
+      if (sessionId) this.rememberSessionCard(state.messageId, { chatId:state.chatId, sessionId, baseJson:baseCardJson, cardId:state.cardId, sequence:state.sequence });
       this.activeCards.delete(cardKey);
       this.clearPendingCardFinalization(cardKey);
       console.log(`[feishu-adapter] Card finalized: streamKey=${cardKey}, cardId=${state.cardId}, status=${request.status}, elapsed=${formatElapsed(elapsedMs)}`);
@@ -1359,7 +1401,7 @@ export class FeishuAdapter extends BaseChannelAdapter {
     // If there are inline buttons (permission prompts), send card with action buttons
     if (message.inlineButtons && message.inlineButtons.length > 0) {
       if (message.inlineButtons.flat().every(button => button.callbackData.startsWith('session:'))) {
-        return this.sendSessionNavigationCard(message.address.chatId, text, message.inlineButtons);
+        return this.sendSessionNavigationCard(message.address.chatId, text, message.inlineButtons, { ...message, text });
       }
       return this.sendPermissionCard(message.address.chatId, text, message.inlineButtons);
     }
@@ -1381,14 +1423,14 @@ export class FeishuAdapter extends BaseChannelAdapter {
     return feishuSiteToApiBaseUrl(this.site);
   }
 
-  private async sendSessionNavigationCard(chatId: string, text: string, buttons: import('../types.js').InlineButton[][]): Promise<SendResult> {
+  private async sendSessionNavigationCard(chatId: string, text: string, buttons: import('../types.js').InlineButton[][], message?: OutboundMessage): Promise<SendResult> {
     if (!this.restClient) return { ok: false, error: 'Feishu client not initialized' };
     try {
       const result = await this.withFeishuRequestTimeout(chatId, 'im.message.create:session-navigation', () => this.restClient!.im.message.create({
         params: { receive_id_type: 'chat_id' },
-        data: { receive_id: chatId, msg_type: 'interactive', content: buildActionCard(text, buttons, chatId) },
+        data: { receive_id: chatId, msg_type: 'interactive', content: buildActionCard(text, buttons, chatId, message?.sections) },
       }));
-      if (result?.data?.message_id) return { ok: true, messageId: result.data.message_id };
+      if (result?.data?.message_id) { if (message?.sessionPicker || message?.resultSessionId) this.rememberSessionCard(result.data.message_id, {chatId, message}); return { ok: true, messageId: result.data.message_id }; }
       return { ok: false, error: `会话卡片发送失败：${result?.msg || '无消息回执'}` };
     } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) }; }
   }

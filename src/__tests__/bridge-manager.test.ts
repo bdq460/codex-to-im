@@ -807,6 +807,7 @@ describe('bridge-manager status formatting', () => {
     state.adapters.set('feishu', {
       channelType: 'feishu',
       provider: 'feishu',
+      isAuthorized: () => true,
       isRunning: () => true,
       onMirrorStreamStart: (_chatId: string, streamKey: string) => {
         streamEvents.push(`start:${streamKey}`);
@@ -857,9 +858,9 @@ describe('bridge-manager status formatting', () => {
 
       assert.equal(subscription.pendingTurn?.streamStarted, true);
       assert.deepEqual(streamEvents, [
-        'start:mirror:session-1:turn-1',
-        'text:mirror:session-1:turn-1:<桌面线程>\n\n我: desktop prompt\n\ncodex:',
-        'status:mirror:session-1:turn-1:处理中',
+        'start:mirror:session-1:turn-1:chat:Y2hhdC0x',
+        'text:mirror:session-1:turn-1:chat:Y2hhdC0x:<桌面线程>\n\n我: desktop prompt\n\ncodex:',
+        'status:mirror:session-1:turn-1:chat:Y2hhdC0x:处理中',
       ]);
     } finally {
       Date.now = originalDateNow;
@@ -873,6 +874,7 @@ describe('bridge-manager status formatting', () => {
     state.adapters.set('feishu', {
       channelType: 'feishu',
       provider: 'feishu',
+      isAuthorized: () => true,
       isRunning: () => true,
       onMirrorStreamStart: (_chatId: string, streamKey: string) => {
         streamEvents.push(`start:${streamKey}`);
@@ -918,9 +920,9 @@ describe('bridge-manager status formatting', () => {
 
       assert.equal(subscription.pendingTurn?.userText, '（基于 Review findings）\nok,当前调整已经可以收尾了吗');
       assert.deepEqual(streamEvents, [
-        'start:mirror:session-1:turn-1',
-        'text:mirror:session-1:turn-1:<桌面线程>\n\n我:\n（基于 Review findings）\nok,当前调整已经可以收尾了吗\n\ncodex:',
-        'status:mirror:session-1:turn-1:处理中',
+        'start:mirror:session-1:turn-1:chat:Y2hhdC0x',
+        'text:mirror:session-1:turn-1:chat:Y2hhdC0x:<桌面线程>\n\n我:\n（基于 Review findings）\nok,当前调整已经可以收尾了吗\n\ncodex:',
+        'status:mirror:session-1:turn-1:chat:Y2hhdC0x:处理中',
       ]);
     } finally {
       Date.now = originalDateNow;
@@ -934,6 +936,7 @@ describe('bridge-manager status formatting', () => {
     state.adapters.set('feishu', {
       channelType: 'feishu',
       provider: 'feishu',
+      isAuthorized: () => true,
       isRunning: () => true,
       onMirrorStreamStart: () => {},
       onStreamText: (_chatId: string, text: string) => {
@@ -986,6 +989,7 @@ describe('bridge-manager status formatting', () => {
     state.adapters.set('feishu', {
       channelType: 'feishu',
       provider: 'feishu',
+      isAuthorized: () => true,
       isRunning: () => true,
       send: async (message: OutboundMessage): Promise<SendResult> => {
         sentMessages.push(message);
@@ -1057,6 +1061,7 @@ describe('bridge-manager status formatting', () => {
     state.adapters.set('feishu', {
       channelType: 'feishu',
       provider: 'feishu',
+      isAuthorized: () => true,
       isRunning: () => true,
       onStreamText: () => {},
       onStreamStatus: (_chatId: string, text: string, streamKey: string) => {
@@ -1094,7 +1099,7 @@ describe('bridge-manager status formatting', () => {
     );
 
     assert.deepEqual(statusEvents, [
-      'status:mirror:session-1:turn-1:已运行 5分，上次响应距今 20秒',
+      'status:mirror:session-1:turn-1:chat:Y2hhdC0x:已运行 5分，上次响应距今 20秒',
     ]);
   });
 
@@ -1106,6 +1111,7 @@ describe('bridge-manager status formatting', () => {
     state.adapters.set('feishu', {
       channelType: 'feishu',
       provider: 'feishu',
+      isAuthorized: () => true,
       isRunning: () => true,
       onStreamText: () => {},
       onStreamStatus: (_chatId: string, text: string, streamKey: string) => {
@@ -1154,8 +1160,8 @@ describe('bridge-manager status formatting', () => {
     );
 
     assert.deepEqual(statusEvents, [
-      'status:mirror:session-1:turn-1:已运行 5分，上次响应距今 20秒',
-      'status:mirror:session-1:turn-1:已运行 5分，上次响应距今 20秒',
+      'status:mirror:session-1:turn-1:chat:Y2hhdC0x:已运行 5分，上次响应距今 20秒',
+      'status:mirror:session-1:turn-1:chat:Y2hhdC0x:已运行 5分，上次响应距今 20秒',
     ]);
     assert.equal(subscription.pendingTurn.lastStatusText, '已运行 5分，上次响应距今 20秒');
   });
@@ -1399,6 +1405,7 @@ describe('bridge-manager status formatting', () => {
     state.adapters.set('feishu', {
       channelType: 'feishu',
       provider: 'feishu',
+      isAuthorized: () => true,
       isRunning: () => true,
       onStreamText: () => {},
       onStreamStatus: (_chatId: string, text: string, streamKey: string) => {
@@ -1445,7 +1452,7 @@ describe('bridge-manager status formatting', () => {
     );
 
     assert.deepEqual(statusEvents, [
-      'status:mirror:session-1:turn-1:已运行 10分1秒，上次响应距今 10分1秒',
+      'status:mirror:session-1:turn-1:chat:Y2hhdC0x:已运行 10分1秒，上次响应距今 10分1秒',
     ]);
   });
 
@@ -1928,6 +1935,7 @@ describe('bridge-manager mirror subscription recovery', () => {
     state.adapters.set(address.channelType, {
       channelType: address.channelType,
       provider: 'feishu',
+      isAuthorized: () => true,
       isRunning: () => false,
     });
 
@@ -1972,6 +1980,7 @@ describe('bridge-manager mirror subscription recovery', () => {
     state.adapters.set(address.channelType, {
       channelType: address.channelType,
       provider: 'feishu',
+      isAuthorized: () => true,
       isRunning: () => false,
     });
 
@@ -2014,6 +2023,7 @@ describe('bridge-manager mirror subscription recovery', () => {
     state.adapters.set(address.channelType, {
       channelType: address.channelType,
       provider: 'feishu',
+      isAuthorized: () => true,
       isRunning: () => false,
     });
     state.mirrorSubscriptions.set(binding.id, {

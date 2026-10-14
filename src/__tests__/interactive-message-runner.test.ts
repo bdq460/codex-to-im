@@ -320,6 +320,8 @@ describe('interactive-message-runner', () => {
 
   it('keeps last response age visible when tool progress updates the status area', async () => {
     const adapter = new FakeFeishuStreamingAdapter();
+    adapter.streamEndResult = true;
+    const notifiedResponses: string[] = [];
     const address = {
       channelType: 'feishu-default',
       channelProvider: 'feishu',
@@ -367,6 +369,7 @@ describe('interactive-message-runner', () => {
           }
         },
         async deliverResponse() {},
+        async notifySubscribers(response) { notifiedResponses.push(response.text); await new Promise<void>(()=>{}); },
         persistSdkSessionUpdate() {},
         processMessageImpl: async (_binding, _text, _onPermission, _abortSignal, _files, onPartialText, onToolEvent) => {
           onPartialText?.('第一段输出');
@@ -396,6 +399,7 @@ describe('interactive-message-runner', () => {
     );
 
     assert.equal(clock.activeCount(), 0);
+    assert.deepEqual(notifiedResponses, ['最终回复']);
   });
 
   it('finalizes a hanging task from an external terminal desktop event', async () => {

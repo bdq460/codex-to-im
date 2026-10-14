@@ -1,3 +1,5 @@
+import { deliverSubscribedResponse } from './subscribed-response-delivery.js';
+import { initializeChatSubscriptions } from './notification-subscriptions.js';
 import { sendSessionPicker } from './session-navigation.js';
 import { handleSessionAction, routeSessionReply, sessionInteractionLockId } from './session-interactions.js';
 import { savePendingMessage, rememberSessionMessage } from './session-interaction-store.js';
@@ -684,6 +686,7 @@ export async function start(): Promise<void> {
     return;
   }
 
+  for (const binding of store.listChannelBindings()) initializeChatSubscriptions(store, { channelType:binding.channelType, chatId:binding.chatId });
   INTERACTIVE_RUNTIME.resetPersistedInteractiveRuntimeState();
   try {
     const releasedHandoffs = await DESKTOP_HANDOFF_CONTROL.reconcilePersistedTasks();
@@ -1074,6 +1077,7 @@ async function handleMessage(
       releaseInteractiveTask: (sessionId, taskId) => INTERACTIVE_RUNTIME.releaseInteractiveTask(sessionId, taskId),
       releaseBridgeTurn: (sessionId, taskId) => TURN_COORDINATOR.releaseSessionTurn(sessionId, taskId),
       deliverResponse,
+      notifySubscribers: (response) => deliverSubscribedResponse(store, msg.address, binding!.codepilotSessionId, response, channel => getState().adapters.get(channel) || null),
       persistSdkSessionUpdate,
       desktopTerminalFinalizationTimeoutMs: DESKTOP_TERMINAL_FINALIZATION_TIMEOUT_MS,
   });

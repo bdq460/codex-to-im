@@ -72,6 +72,8 @@ export abstract class BaseChannelAdapter {
    */
   abstract send(message: OutboundMessage): Promise<SendResult>;
 
+  refreshSessionCards?(_address: import('./types.js').ChannelAddress): Promise<void>;
+
   /**
    * Answer a callback query or interactive-card action when supported.
    * Not all platforms support this — default implementation is a no-op.

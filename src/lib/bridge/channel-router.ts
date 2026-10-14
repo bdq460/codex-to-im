@@ -1,3 +1,4 @@
+import { initializeChatSubscriptions } from './notification-subscriptions.js';
 /**
  * Channel Router — resolves IM addresses to CodePilot sessions.
  *
@@ -84,6 +85,7 @@ export function createBinding(
     store.updateSessionProviderId(session.id, defaultProviderId);
   }
 
+  initializeChatSubscriptions(store, address);
   return store.upsertChannelBinding({
     channelType: address.channelType,
     chatId: address.chatId,

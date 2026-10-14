@@ -1,3 +1,4 @@
+import { notificationPanelPayload, updateNotificationPanel, NOTIFICATION_PANEL_SCRIPT } from './ui-notification-subscriptions.js';
 import { FEISHU_TEMPLATE_HTML, FEISHU_TEMPLATE_SCRIPT } from './ui-feishu-template.js';
 import { readFeishuTemplate, saveFeishuTemplate, FeishuTemplateError } from './feishu-template-store.js';
 import { FEISHU_REFERENCE_PROFILE } from './feishu-reference-profile.js';
@@ -3520,7 +3521,9 @@ function renderHtml(): string {
           + '<div class="panel-block">'
           +   '<p class="panel-subtitle">当前绑定</p>'
           +   bindingsHtml
-          + '</div>';
+          + '</div>'
+          + '<div class="panel-block" id="notificationSubscriptionPanel"></div>';
+        void renderNotificationPanel(channel.id);
       }
 
       function renderChannelsWorkspace() {
@@ -3615,6 +3618,7 @@ function renderHtml(): string {
       ${RUNTIME_CONTROL_SCRIPT}
       ${FEISHU_REGISTRATION_SCRIPT}
       ${FEISHU_TEMPLATE_SCRIPT}
+      ${NOTIFICATION_PANEL_SCRIPT}
 
       async function loadStatus() {
         const status = await api('/api/status');
@@ -4313,6 +4317,19 @@ const server = http.createServer(async (request, response) => {
         sessions: listDesktopSessions(limit),
       });
       return;
+    }
+
+    if (url.pathname === '/api/notification-subscriptions' && (request.method === 'GET' || request.method === 'POST')) {
+      const payload = request.method === 'POST' ? await readJsonBody<Record<string, unknown>>(request) : {};
+      const channelId = asString(payload.channelId) || url.searchParams.get('channelId') || '';
+      if (!findChannelInstance(channelId, config)) throw new HttpRequestError(404, '通道不存在。');
+      const store = createUiStore();
+      if (request.method === 'POST') {
+        if (typeof payload.enabled !== 'boolean') throw new HttpRequestError(400, 'enabled 必须为布尔值。');
+        try { updateNotificationPanel(store, channelId, asString(payload.chatId) || '', asString(payload.target) || '', payload.enabled); }
+        catch(error) { throw new HttpRequestError(400, error instanceof Error ? error.message : '订阅修改失败。'); }
+      }
+      json(response, 200, notificationPanelPayload(store,channelId)); return;
     }
 
     if (request.method === 'GET' && url.pathname === '/api/bindings') {

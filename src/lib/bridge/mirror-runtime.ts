@@ -1,3 +1,4 @@
+import { notificationBindings } from './notification-subscriptions.js';
 import fs from 'node:fs';
 
 import type { DesktopMirrorRecord, DesktopSessionSummary } from '../../desktop-sessions.js';
@@ -94,6 +95,7 @@ export function createMirrorRuntime(
   deps: CreateMirrorRuntimeDeps,
 ): MirrorRuntime {
   const orphanProbeAt = new Map<string, number>();
+  const observedSendingBindings = new Map<string, string>();
 
   function isAtOrBefore(timestamp: string | null | undefined, boundary: string): boolean {
     if (!timestamp) return true;
@@ -258,7 +260,7 @@ export function createMirrorRuntime(
     removeMirrorSubscription(subscription.bindingId);
   }
 
-  function upsertMirrorSubscription(binding: { id: string; channelType: string; chatId: string; codepilotSessionId: string; sdkSessionId: string }): void {
+  function upsertMirrorSubscription(binding: { id: string; channelType: string; chatId: string; codepilotSessionId: string; sdkSessionId: string; lastDeliveredAt?: string }): void {
     const { store } = getBridgeContext();
     const state = getState();
     const session = store.getSession(binding.codepilotSessionId);
@@ -285,7 +287,7 @@ export function createMirrorRuntime(
         chatId: binding.chatId,
         threadId,
         filePath,
-        lastDeliveredAt: session.mirror_last_event_at || null,
+        lastDeliveredAt: binding.lastDeliveredAt || session.mirror_last_event_at || null,
       });
       watchMirrorFile(created, filePath);
       state.mirrorSubscriptions.set(binding.id, created);
@@ -299,7 +301,7 @@ export function createMirrorRuntime(
       chatId: binding.chatId,
       threadId,
       filePath,
-      lastDeliveredAt: session.mirror_last_event_at || null,
+      lastDeliveredAt: binding.lastDeliveredAt || session.mirror_last_event_at || null,
     });
     if (threadChanged || filePathChanged) {
       deps.stopMirrorStreaming(existing);
@@ -315,8 +317,19 @@ export function createMirrorRuntime(
   function syncMirrorSubscriptionSet(): void {
     const { store } = getBridgeContext();
     const state = getState();
+    const currentBindings = store.listChannelBindings();
+    const addresses = new Map(currentBindings.map(b => [JSON.stringify([b.channelType,b.chatId]), b]));
+    for (const [key] of observedSendingBindings) {
+      if (!addresses.has(key)) { const [channelType,chatId]=JSON.parse(key); addresses.set(key, {channelType,chatId,codepilotSessionId:''} as typeof currentBindings[number]); }
+    }
+    for (const [key, address] of addresses) {
+      if (observedSendingBindings.get(key) === address.codepilotSessionId) continue;
+      observedSendingBindings.set(key,address.codepilotSessionId);
+      const adapter=state.adapters.get(address.channelType);
+      void adapter?.refreshSessionCards?.(address).catch(error => console.warn('[bridge-manager] Session card state refresh failed:', deps.describeUnknownError(error)));
+    }
     const plan = buildMirrorSubscriptionRegistryPlan(
-      store.listChannelBindings(),
+      notificationBindings(store).filter(b => { const adapter=state.adapters.get(b.channelType); return adapter && adapter.isAuthorized(b.chatUserId || '',b.chatId); }),
       state.adapters.keys(),
       state.mirrorSubscriptions.keys(),
       (sessionId) => store.getSession(sessionId),
@@ -515,6 +528,7 @@ export function createMirrorRuntime(
   }
 
   function clearMirrorSubscriptions(): void {
+    observedSendingBindings.clear();
     const state = getState();
     for (const bindingId of Array.from(state.mirrorSubscriptions.keys())) {
       removeMirrorSubscription(bindingId);

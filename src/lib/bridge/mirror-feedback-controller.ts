@@ -1,3 +1,4 @@
+import { checkpointNotification } from './notification-subscriptions.js';
 import type { BaseChannelAdapter } from './channel-adapter.js';
 import { deliver } from './delivery-layer.js';
 import {
@@ -71,6 +72,8 @@ export interface MirrorFeedbackController {
   ): Promise<{ deliveredCount: number; error?: unknown }>;
 }
 
+export function notificationStreamKey(subscription: Pick<DesktopMirrorSubscription, 'chatId'>, streamKey: string): string { return `${streamKey}:chat:${Buffer.from(subscription.chatId).toString('base64url')}`; }
+
 function createMirrorStreamFeedbackTarget(
   subscription: DesktopMirrorSubscription,
   turnState: DesktopMirrorTurnState,
@@ -81,7 +84,7 @@ function createMirrorStreamFeedbackTarget(
     adapter,
     channelType: subscription.channelType,
     chatId: subscription.chatId,
-    streamKey: turnState.streamKey,
+    streamKey: notificationStreamKey(subscription, turnState.streamKey),
     ensureStarted: () => {
       startMirrorStreaming(subscription, turnState);
     },
@@ -125,9 +128,9 @@ export function createMirrorFeedbackController(
     if (!adapter || turnState.streamStarted) return;
 
     try {
-      adapter.onMirrorStreamStart?.(subscription.chatId, turnState.streamKey);
+      adapter.onMirrorStreamStart?.(subscription.chatId, notificationStreamKey(subscription, turnState.streamKey));
       if (!adapter.onMirrorStreamStart) {
-        adapter.onStreamText?.(subscription.chatId, '', turnState.streamKey);
+        adapter.onStreamText?.(subscription.chatId, '', notificationStreamKey(subscription, turnState.streamKey));
       }
       turnState.streamStarted = true;
     } catch {
@@ -326,7 +329,7 @@ export function createMirrorFeedbackController(
           subscription.chatId,
           turn.status,
           streamText,
-          turn.streamKey,
+          notificationStreamKey(subscription, turn.streamKey),
         );
         if (finalized) {
           if (attachments.length > 0) {
@@ -389,6 +392,7 @@ export function createMirrorFeedbackController(
     for (const turn of turns.slice(0, deps.eventBatchLimit)) {
       try {
         await deliverMirrorTurn(subscription, turn);
+        if (subscription.lastDeliveredAt) checkpointNotification(subscription.bindingId, subscription.lastDeliveredAt);
         deliveredCount += 1;
       } catch (error) {
         return { deliveredCount, error };

@@ -1,6 +1,6 @@
 import './test-setup.js';
 import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
+import { describe, it, beforeEach } from 'node:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -21,6 +21,7 @@ const proxyOutput = 'HTTPSEnable : 1\nHTTPSProxy : 127.0.0.1\nHTTPSPort : 7897';
 const deps = { streamChat: () => new ReadableStream<string>({ start(c) { c.close(); } }) };
 
 describe('session navigation', () => {
+  beforeEach(()=>initBridgeContext({store:new JsonFileStore(new Map()),llm:deps,permissions:{resolvePendingPermission:()=>false},lifecycle:{}}));
   it('scopes signed buttons to chat and channel, expiry and payload integrity', () => {
     const token = encodeSessionAction(address, { kind: 'enter', threadId: id }, 100);
     assert.deepEqual(decodeSessionAction(token, address, 101), { kind: 'enter', threadId: id });
@@ -31,13 +32,13 @@ describe('session navigation', () => {
   });
   it('offers three recent sessions, new and full list without executing the input', () => {
     const sessions = Array.from({ length: 9 }, (_, i) => ({ threadId: id, title: `会话${i}`, cwd: '/projects/app' }));
-    const picker = buildSessionPicker(address, sessions, { unbound: true, recent: true });
-    assert.match(picker.text, /当前未进入会话/);
-    assert.match(picker.text, /尚未执行/);
-    assert.equal(picker.inlineButtons.flat().filter(b => b.text.startsWith('进入')).length, 3);
-    assert.ok(picker.inlineButtons.flat().some(b => b.text === '展开全部会话'));
+    const picker = buildSessionPicker(address, sessions, { unbound: true, recent: true, pendingId: 'queued-message' });
+    assert.match(picker.text, /当前发送：未选择/);
+    assert.match(picker.text, /原消息已保留/);
+    assert.equal(picker.inlineButtons.flat().filter(b => b.text === '在此会话继续原消息').length, 3);
+    assert.ok(picker.inlineButtons.flat().some(b => b.text === '全部会话'));
     const next = buildSessionPicker(address, sessions, { offset: 6 });
-    assert.equal(next.inlineButtons.flat().filter(b => b.text.startsWith('进入')).length, 3);
+    assert.equal(next.inlineButtons.flat().filter(b => b.text === '设为当前').length, 3);
     assert.ok(next.inlineButtons.flat().some(b => b.text === '上一页'));
     assert.ok(!next.inlineButtons.flat().some(b => b.text === '下一页'));
     const card = JSON.parse(buildActionCard(picker.text, picker.inlineButtons, address.chatId));
@@ -117,7 +118,7 @@ describe('session navigation', () => {
       const adapter: any = { channelType: address.channelType, provider: 'feishu', send: async (m: any) => { sent.push(m); return { ok: true, messageId: 'notice-1' }; } };
       await _testOnly.handleMessage(adapter, { address: { ...address, chatId: 'unbound-test' }, messageId: 'incoming-1', text: '帮我检查', timestamp: Date.now() });
       assert.equal(calls, 0); assert.equal(store.getChannelBinding(address.channelType, 'unbound-test'), null);
-      assert.match(sent[0].text, /当前未进入会话/);
+      assert.match(sent[0].text, /当前发送：未选择/);
       assert.ok(sent[0].inlineButtons.length);
     } finally { if (old === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = old; fs.rmSync(home, { recursive: true, force: true }); }
   });

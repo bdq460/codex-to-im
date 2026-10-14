@@ -32,6 +32,7 @@ export async function deliverTextResponse(
     return deliver(adapter, {
       address,
       text: parseMode === 'Markdown' ? responseText : renderedText,
+      resultSessionId: sessionId,
       inlineButtons: sessionId ? sessionResultButtons(address, sessionId) : undefined,
       parseMode: 'Markdown',
       replyToMessageId,
