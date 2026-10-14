@@ -1666,7 +1666,7 @@ function renderHtml(): string {
 
       .channel-header-actions {
         display: grid;
-        grid-template-columns: repeat(2, minmax(0, max-content));
+        grid-template-columns: 280px 220px;
         align-items: stretch;
         justify-content: flex-end;
         gap: 12px;
@@ -1735,16 +1735,15 @@ function renderHtml(): string {
 
       .channel-layout {
         display: grid;
-        grid-template-columns: 280px minmax(0, 1fr);
-        gap: 20px;
+        gap: 22px;
       }
 
       .channel-sidebar {
-        border-right: 1px solid var(--border);
-        padding-right: 20px;
+        min-width: 0;
+        border-bottom: 1px solid var(--border);
+        padding-bottom: 20px;
         display: grid;
-        gap: 12px;
-        align-content: start;
+        gap: 10px;
       }
 
       .channel-sidebar-meta {
@@ -1753,12 +1752,14 @@ function renderHtml(): string {
       }
 
       .channel-list {
-        display: grid;
-        gap: 8px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
       }
 
       .channel-list-item {
-        width: 100%;
+        flex: 0 1 280px;
+        min-width: min(100%, 220px);
         text-align: left;
         border-radius: 10px;
         padding: 12px 14px;
@@ -2190,6 +2191,8 @@ function renderHtml(): string {
         .section-grid {
           grid-template-columns: 1fr;
         }
+        .channel-workspace .panel-header { flex-direction: column; }
+        .channel-header-actions { justify-content: start; }
       }
 
       @media (max-width: 980px) {
@@ -2197,8 +2200,6 @@ function renderHtml(): string {
         .sidebar { border-right: 0; border-bottom: 1px solid var(--sidebar-border); }
         .nav { grid-template-columns: repeat(6, minmax(0, 1fr)); }
         .main { padding: 20px 20px 28px; }
-        .channel-layout { grid-template-columns: 1fr; }
-        .channel-sidebar { border-right: 0; padding-right: 0; }
         .channel-header-actions {
           grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
           justify-content: stretch;
@@ -2214,6 +2215,7 @@ function renderHtml(): string {
       }
 
       @media (max-width: 720px) {
+        .channel-list-item { flex: 1 1 220px; }
         .nav { grid-template-columns: repeat(2, minmax(0, 1fr)); }
         .status-grid { grid-template-columns: 1fr; }
         .page-header,
