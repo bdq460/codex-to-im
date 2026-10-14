@@ -64,7 +64,7 @@ export async function handleSessionAction(adapter: BaseChannelAdapter, msg: Inbo
     }
     if (!session || (action.enabled && !usableSession(session.id))) { await deliverBridgeNotice(adapter, msg.address, '会话不可用，请刷新列表。'); return; }
     setNotificationSubscription(store, msg.address, session.id, action.enabled);
-    await deliverBridgeNotice(adapter, msg.address, `${action.enabled ? '已订阅' : '已取消订阅'}「${session.name}」的通知。当前发送会话保持不变。`);
+    await deliverBridgeNotice(adapter, msg.address, `${action.enabled ? '已订阅' : '已取消订阅'}「${session.name}」的通知。当前绑定会话保持不变；你主动发起的任务仍会回复。`);
     await adapter.refreshSessionCards?.(msg.address);
     if (!adapter.refreshSessionCards) await sendSessionPicker(adapter, msg.address, { offset: action.offset, view: action.view, pendingId: action.pendingId });
     return;

@@ -44,13 +44,13 @@ test('explicit subscription is idempotent, scoped, survives unbinding and has in
   assert.equal(listChatSubscriptions(f.store,other).length,1);
 });
 test('current button is hidden; picker groups context with independent selection and subscription buttons',()=>{
-  const f=fixture();assert.deepEqual(sessionResultButtons(f.address,f.a.id).flat().map(b=>b.text),['选择其它会话']);
-  assert.ok(sessionResultButtons(f.address,f.b.id).flat().some(b=>b.text==='设为当前会话'));
+  const f=fixture();assert.deepEqual(sessionResultButtons(f.address,f.a.id).flat().map(b=>b.text),['取消订阅','选择其它会话']);
+  assert.ok(sessionResultButtons(f.address,f.b.id).flat().some(b=>b.text==='绑定此会话'));
   const picker=buildSessionPicker(f.address,[{threadId:f.a.id,sessionId:f.a.id,title:'A',cwd:'/tmp/a'},{threadId:f.b.id,sessionId:f.b.id,title:'B',cwd:'/tmp/b'}],{view:'all'});
-  assert.match(picker.sections[0].text,/当前发送/);assert.deepEqual(picker.sections[0].buttons.map(b=>b.text),['取消通知订阅']);
-  assert.deepEqual(picker.sections[1].buttons.map(b=>b.text),['设为当前','订阅通知']);
+  assert.match(picker.sections[0].text,/当前绑定会话/);assert.deepEqual(picker.sections[0].buttons.map(b=>b.text),['取消订阅']);
+  assert.deepEqual(picker.sections[1].buttons.map(b=>b.text),['绑定此会话','取消订阅']);
   const card=JSON.parse(buildActionCard(picker.text,picker.navigationButtons,f.address.chatId,picker.sections));
-  const elements=card.body.elements;assert.match(elements[1].content,/A/);assert.equal(elements[2].columns[0].elements[0].text.content,'取消通知订阅');
+  const elements=card.body.elements;assert.match(elements[1].content,/A/);assert.equal(elements[2].columns[0].elements[0].text.content,'取消订阅');
 });
 test('same-session notifications use separate card keys for each receiving chat',()=>{
   assert.notEqual(notificationStreamKey({chatId:'one'},'mirror:session:turn'),notificationStreamKey({chatId:'two'},'mirror:session:turn'));
@@ -69,13 +69,13 @@ test('final result buttons update after switching, including a recreated adapter
   const first:any=new FeishuAdapter(instance);let sent:any;
   first.restClient={im:{message:{create:async(r:any)=>{sent=JSON.parse(r.data.content);return {data:{message_id:'cached-'+f.address.chatId}};}}}};
   await first.send({address:f.address,text:'result-A',parseMode:'Markdown',resultSessionId:f.a.id,inlineButtons:sessionResultButtons(f.address,f.a.id)});
-  assert.doesNotMatch(JSON.stringify(sent),/设为当前会话/);
+  assert.doesNotMatch(JSON.stringify(sent),/绑定此会话/);
   bindStoreToSession(f.store,f.address.channelType,f.address.chatId,f.b.id);
   const restored:any=new FeishuAdapter(instance);const patches:any[]=[];
   restored.restClient={im:{message:{patch:async(r:any)=>{patches.push(JSON.parse(r.data.content));return {};}}}};
-  await restored.refreshSessionCards(f.address);assert.match(JSON.stringify(patches),/设为当前会话/);
+  await restored.refreshSessionCards(f.address);assert.match(JSON.stringify(patches),/绑定此会话/);
   bindStoreToSession(f.store,f.address.channelType,f.address.chatId,f.a.id);patches.length=0;
-  await restored.refreshSessionCards(f.address);assert.doesNotMatch(JSON.stringify(patches),/设为当前会话/);
+  await restored.refreshSessionCards(f.address);assert.doesNotMatch(JSON.stringify(patches),/绑定此会话/);
 });
 test('workbench reads without changing subscription state and edits receive settings without changing send target',async()=>{
   const {notificationPanelPayload,updateNotificationPanel}=await import('../ui-notification-subscriptions.js');

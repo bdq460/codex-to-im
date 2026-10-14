@@ -1,5 +1,5 @@
 import './test-setup.js';
-import { beforeEach, describe, it } from 'node:test';
+import { beforeEach, after, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -2328,3 +2328,7 @@ describe('channel-router defaults', () => {
     assert.ok((session?.working_directory || '').startsWith(path.join(CTI_HOME, 'runtime', 'internal-sessions', 'draft')));
   });
 });
+
+// Auto discovery is tested separately; orchestration fixtures must not watch real Desktop sessions.
+beforeEach(()=>_testOnly.setAutomaticNotificationDiscovery(()=>[]));
+after(()=>{_testOnly.resetStateForTests();_testOnly.setAutomaticNotificationDiscovery(undefined);});

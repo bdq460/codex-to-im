@@ -307,7 +307,7 @@ export class FeishuAdapter extends BaseChannelAdapter {
     const session = getBridgeContext().store.getSession(sessionId);
     const current = getBridgeContext().store.getChannelBinding(this.channelType,chatId)?.codepilotSessionId===sessionId;
     const actions = JSON.parse(buildActionCard('',sessionResultButtons(address,sessionId),chatId));
-    card.body.elements.push({tag:'markdown',content:`会话：${(session?.name || '未命名会话').replace(/[\r\n]/g,' ')}${current ? ' · 当前发送会话' : ''} · 引用回复可进入此会话`},...actions.body.elements.slice(1));
+    card.body.elements.push({tag:'markdown',content:`会话：${(session?.name || '未命名会话').replace(/[\r\n]/g,' ')}${current ? ' · 当前绑定会话' : ''} · 引用回复可进入此会话`},...actions.body.elements.slice(1));
     return card;
   }
   readonly channelType: ChannelType;

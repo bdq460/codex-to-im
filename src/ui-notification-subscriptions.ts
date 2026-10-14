@@ -1,6 +1,6 @@
 import { listDesktopSessions, getDesktopSessionByThreadId } from './desktop-sessions.js';
 import { ensureDesktopBridgeSession } from './session-bindings.js';
-import { listChatSubscriptions, notificationChatAddresses, setNotificationSubscription } from './lib/bridge/notification-subscriptions.js';
+import { listChatSubscriptions, notificationChatAddresses, setNotificationSubscription, notificationPolicy } from './lib/bridge/notification-subscriptions.js';
 import type { BridgeStore } from './lib/bridge/host.js';
 export function notificationPanelPayload(store: BridgeStore, channelId: string) {
   const sessions = store.listSessions().filter(s=>!s.hidden && !s.parent_session_id && s.session_type !== 'draft' && (!s.expires_at || Date.parse(s.expires_at)>Date.now()));
@@ -11,7 +11,7 @@ export function notificationPanelPayload(store: BridgeStore, channelId: string) 
   options.sort((a,b)=>(Date.parse(b.lastEventAt || '') || 0)-(Date.parse(a.lastEventAt || '') || 0));
   const chats = notificationChatAddresses(store).filter(a=>a.channelType===channelId).map(a=>{
     const b=store.getChannelBinding(a.channelType,a.chatId);
-    return {chatId:a.chatId,title:b?.chatDisplayName || a.chatId,currentSessionId:b?.codepilotSessionId,subscriptions:listChatSubscriptions(store,a).map(r=>({sessionId:r.sessionId,title:store.getSession(r.sessionId)?.name || '已删除的会话'}))};
+    return {...notificationPolicy(a),chatId:a.chatId,title:b?.chatDisplayName || a.chatId,currentSessionId:b?.codepilotSessionId,subscriptions:listChatSubscriptions(store,a).map(r=>({sessionId:r.sessionId,title:store.getSession(r.sessionId)?.name || '已删除的会话'}))};
   });
   return {chats,options};
 }

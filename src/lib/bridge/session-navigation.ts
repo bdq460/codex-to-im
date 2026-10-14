@@ -6,7 +6,7 @@ import { deliver } from './delivery-layer.js';
 import { getDisplayedDesktopThreads, getWorkspaceRoot } from './bridge-session-support.js';
 
 import { navigationSecret } from './session-interaction-store.js';
-import { listChatSubscriptions } from './notification-subscriptions.js';
+import { listChatSubscriptions, isNotificationSubscribed } from './notification-subscriptions.js';
 import { getBridgeContext } from './context.js';
 const key = navigationSecret();
 const TTL = 30 * 60_000;
@@ -16,7 +16,7 @@ export type PickerOptions = { unbound?: boolean; offset?: number; recent?: boole
 export type SessionAction = ({ kind: 'enter'; threadId: string } | { kind: 'resume'; sessionId: string } | { kind: 'list'; offset: number; view?: PickerView } | { kind: 'subscribe'; threadId: string; enabled: boolean; offset?: number; view?: PickerView } | { kind: 'new' }) & { pendingId?: string };
 
 export function encodeSessionAction(address: ChannelAddress, action: SessionAction, now = Date.now()): string {
-  const payload = Buffer.from(JSON.stringify({ channel: address.channelType, chat: address.chatId, action, expires: now + (action.pendingId ? 24 * 60 * 60_000 : action.kind === 'resume' ? 90 * 24 * 60 * 60_000 : TTL) })).toString('base64url');
+  const payload = Buffer.from(JSON.stringify({ channel: address.channelType, chat: address.chatId, action, expires: now + (action.pendingId ? 24 * 60 * 60_000 : (action.kind === 'resume' || action.kind === 'subscribe') ? 90 * 24 * 60 * 60_000 : TTL) })).toString('base64url');
   const sig = crypto.createHmac('sha256', key).update(payload).digest('base64url');
   return `session:${payload}.${sig}`;
 }
@@ -50,20 +50,20 @@ export function buildSessionPicker(address: ChannelAddress, sessions: Array<{ th
   const subscriptions = listChatSubscriptions(store, address);
   const subscribedIds = new Set(subscriptions.map(r => r.sessionId));
   const view = options.view || (options.recent ? 'recent' : 'all');
-  const filtered = view === 'subscribed' ? sessions.filter(s => subscribedIds.has(s.sessionId || store.findSessionBySdkSessionId(s.threadId)?.id || s.threadId)) : sessions;
+  const filtered = view === 'subscribed' ? sessions.filter(s => isNotificationSubscribed(store,address,s.threadId)) : sessions;
   const size = view === 'recent' ? 3 : PAGE_SIZE;
   const offset = Math.min(options.offset || 0, Math.max(0, Math.floor((filtered.length - 1) / size) * size));
   const rows = filtered.slice(offset, offset + size);
-  const text = `**会话中心**\n当前发送：${current?.name || '未选择'}\n通知订阅：${subscriptions.length} 个会话 · 切换发送会话不会改变订阅\n` + (options.pendingId ? '原消息已保留：选择发送会话后自动继续。' : '设为当前仅决定下一条普通消息发给谁；订阅通知仅决定接收谁的结果。');
+  const text = `**会话中心**\n当前绑定会话：${current?.name || '未选择'}\n通知：默认接收全部未归档会话，可逐条取消 · 切换绑定不会改变订阅\n` + (options.pendingId ? '原消息已保留：选择发送会话后自动继续。' : '设为当前仅决定下一条普通消息发给谁；订阅通知仅决定接收谁的结果。');
   const sections = rows.map(s => {
     const id = s.sessionId || store.findSessionBySdkSessionId(s.threadId)?.id || s.threadId;
     const isCurrent = binding?.codepilotSessionId === id || (!!current?.desktop_thread_id && current.desktop_thread_id === s.threadId);
-    const subscribed = subscribedIds.has(id);
+    const subscribed = isNotificationSubscribed(store,address,s.threadId);
     const buttons: InlineButton[] = [];
-    if (!isCurrent || options.pendingId) buttons.push({ text: options.pendingId ? '在此会话继续原消息' : '设为当前', callbackData: encodeSessionAction(address, s.sessionId ? { kind: 'resume', sessionId: s.sessionId, pendingId: options.pendingId } : { kind: 'enter', threadId: s.threadId, pendingId: options.pendingId }) });
-    buttons.push({ text: subscribed ? '取消通知订阅' : '订阅通知', callbackData: encodeSessionAction(address, { kind: 'subscribe', threadId: s.threadId, enabled: !subscribed, offset, view, pendingId: options.pendingId }) });
+    if (!isCurrent || options.pendingId) buttons.push({ text: options.pendingId ? '在此会话继续原消息' : '绑定此会话', callbackData: encodeSessionAction(address, s.sessionId ? { kind: 'resume', sessionId: s.sessionId, pendingId: options.pendingId } : { kind: 'enter', threadId: s.threadId, pendingId: options.pendingId }) });
+    buttons.push({ text: subscribed ? '取消订阅' : '开启订阅', callbackData: encodeSessionAction(address, { kind: 'subscribe', threadId: s.threadId, enabled: !subscribed, offset, view, pendingId: options.pendingId }) });
     const activity = s.lastEventAt && Number.isFinite(Date.parse(s.lastEventAt)) ? new Date(s.lastEventAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }) : '暂无记录';
-    return { text: `**${s.title.replace(/[\r\n]/g, ' ').slice(0, 100)}**${isCurrent ? ' · 当前发送' : ''}\n${subscribed ? '已订阅通知' : '未订阅通知'} · 项目 ${path.basename(s.cwd) || '未指定'}\n最近活动：${activity}`, buttons };
+    return { text: `**${s.title.replace(/[\r\n]/g, ' ').slice(0, 100)}**${isCurrent ? ' · 当前绑定会话' : ''}\n${subscribed ? '已订阅通知' : '未订阅通知'} · 项目 ${path.basename(s.cwd) || '未指定'}\n最近活动：${activity}`, buttons };
   });
   sections.push({ text: rows.length ? `按最近活动倒序 · ${offset + 1}–${offset + rows.length} / ${filtered.length}` : view === 'subscribed' ? '尚无可用订阅。到最近或全部会话中添加。' : '暂时没有可选会话。', buttons: [] });
   const buttons: InlineButton[][] = [[...(['recent','all','subscribed'] as PickerView[]).filter(v => v !== view).map(v => ({ text: v === 'recent' ? '最近活跃' : v === 'all' ? '全部会话' : '我的订阅', callbackData: encodeSessionAction(address, { kind: 'list', offset: 0, view: v, pendingId: options.pendingId }) }))]];
@@ -96,7 +96,8 @@ export function selectableSessions() {
 export function sessionResultButtons(address: ChannelAddress, sessionId: string): InlineButton[][] {
   const current = getBridgeContext().store.getChannelBinding(address.channelType, address.chatId)?.codepilotSessionId;
   return [[
-    ...(current === sessionId ? [] : [{ text: '设为当前会话', callbackData: encodeSessionAction(address, { kind: 'resume', sessionId }) }]),
+    ...(current === sessionId ? [] : [{ text: '绑定此会话', callbackData: encodeSessionAction(address, { kind: 'resume', sessionId }) }]),
+    { text: isNotificationSubscribed(getBridgeContext().store,address,sessionId) ? '取消订阅' : '开启订阅', callbackData: encodeSessionAction(address, {kind:'subscribe',threadId:sessionId,enabled:!isNotificationSubscribed(getBridgeContext().store,address,sessionId)}) },
     { text: '选择其它会话', callbackData: encodeSessionAction(address, { kind: 'list', offset: 0, view: 'recent' }) },
   ]];
 }

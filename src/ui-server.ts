@@ -1,4 +1,5 @@
-import { notificationPanelPayload, updateNotificationPanel, NOTIFICATION_PANEL_SCRIPT } from './ui-notification-subscriptions.js';
+import { notificationPolicy } from './lib/bridge/notification-subscriptions.js';
+import { notificationPanelPayload, updateNotificationPanel } from './ui-notification-subscriptions.js';
 import { FEISHU_TEMPLATE_HTML, FEISHU_TEMPLATE_SCRIPT } from './ui-feishu-template.js';
 import { readFeishuTemplate, saveFeishuTemplate, FeishuTemplateError } from './feishu-template-store.js';
 import { FEISHU_REFERENCE_PROFILE } from './feishu-reference-profile.js';
@@ -756,6 +757,7 @@ async function buildBindingsPayload(store: JsonFileStore, config: Config) {
     }
     return {
       ...binding,
+      notificationExclusions: notificationPolicy({channelType:binding.channelType,chatId:binding.chatId}).excluded,
       chatDisplayName: resolved.chatDisplayName || binding.chatDisplayName,
       chatUserId: resolved.chatUserId || binding.chatUserId,
     };
@@ -2004,6 +2006,7 @@ function renderHtml(): string {
       }
 
       .binding-item {
+        container-type: inline-size;
         border: 1px solid var(--border);
         border-radius: 10px;
         background: var(--surface-soft);
@@ -2103,6 +2106,17 @@ function renderHtml(): string {
         border-color: rgba(22, 119, 255, 0.30);
         background: rgba(22, 119, 255, 0.08);
         color: var(--primary);
+      }
+
+      @container (max-width: 540px) {
+        .binding-table thead { display: none; }
+        .binding-table tbody, .binding-table tr { display: block; }
+        .binding-table tr + tr { border-top: 1px solid var(--border); }
+        .binding-table td { display: block; border: 0; padding: 6px 12px; }
+        .binding-table td:nth-child(2) { display: none; }
+        .binding-table td:nth-child(3)::before { content: '项目目录：'; color: var(--muted); font-size: 12px; }
+        .binding-table td:last-child { display: flex; flex-wrap: wrap; gap: 8px; padding-bottom: 12px; }
+        .binding-table tr td:first-child { padding-top: 12px; }
       }
 
       .binding-empty {
@@ -2760,17 +2774,19 @@ function renderHtml(): string {
         return ''
           + '<div class="binding-table-wrap">'
           +   '<table class="binding-table">'
-          +     '<thead><tr><th>标题</th><th>Thread</th><th>目录</th><th>操作</th></tr></thead>'
+          +     '<thead><tr><th>会话名称</th><th>桌面会话 ID</th><th>项目目录</th><th>操作</th></tr></thead>'
           +     '<tbody>'
           +       sessions.map((session) => {
             const targetKey = 'desktop:' + session.threadId;
             const active = targetKey === binding.currentTargetKey;
+            const subscribed = !(binding.notificationExclusions || []).includes(session.threadId);
             return ''
               + '<tr class="' + (active ? 'current' : '') + '">'
-              +   '<td><div class="binding-table-title">' + escapeHtml(session.title || 'Untitled Session') + (active ? '<span class="binding-table-mark">当前</span>' : '') + '</div></td>'
+              +   '<td><div class="binding-table-title">' + escapeHtml(session.title || 'Untitled Session') + (active ? '<span class="binding-table-mark">当前绑定</span>' : '') + '</div></td>'
               +   '<td><div class="binding-table-thread"><code>' + escapeHtml(session.threadId) + '</code></div></td>'
               +   '<td><div class="binding-table-path">' + escapeHtml(session.cwd || '(no cwd)') + '</div></td>'
-              +   '<td><button type="button" class="binding-target-btn' + (active ? ' current' : '') + '" data-action="switch-binding-target" data-binding-id="' + escapeHtml(binding.id) + '" data-target-key="' + escapeHtml(targetKey) + '"' + (active ? ' disabled' : '') + '>' + (active ? '当前会话' : '切换到当前会话') + '</button></td>'
+              +   '<td><button type="button" class="binding-target-btn' + (active ? ' current' : '') + '" data-action="switch-binding-target" data-binding-id="' + escapeHtml(binding.id) + '" data-target-key="' + escapeHtml(targetKey) + '"' + (active ? ' disabled' : '') + '>' + (active ? '当前绑定会话' : '绑定此会话') + '</button> '
+              + '<button type="button" class="binding-target-btn" data-action="toggle-binding-subscription" data-binding-id="' + escapeHtml(binding.id) + '" data-channel-id="' + escapeHtml(binding.channelType) + '" data-chat-id="' + escapeHtml(binding.chatId) + '" data-thread-id="' + escapeHtml(session.threadId) + '" data-enabled="' + String(!subscribed) + '">' + (subscribed ? '取消订阅' : '开启订阅') + '</button></td>'
               + '</tr>';
           }).join('')
           +     '</tbody>'
@@ -2789,11 +2805,11 @@ function renderHtml(): string {
           +     '<div class="binding-title">' + escapeHtml(binding.chatDisplayName || binding.chatId) + '</div>'
           +     '<div class="actions">'
           +       '<div class="small">' + escapeHtml(binding.mode) + '</div>'
-          +       '<button type="button" data-action="unbind-binding" data-binding-id="' + escapeHtml(binding.id) + '">解绑当前聊天</button>'
+          +       '<button type="button" data-action="unbind-binding" data-binding-id="' + escapeHtml(binding.id) + '">解除会话绑定</button>'
           +     '</div>'
           +   '</div>'
-          +   '<div class="binding-detail">聊天 ID：<code>' + escapeHtml(binding.chatId) + '</code></div>'
-          +   '<div class="binding-detail">当前会话：<code>' + escapeHtml(binding.currentSessionId.slice(0, 8)) + '...</code> · ' + escapeHtml(binding.currentSessionName) + '</div>'
+          +   '<div class="binding-detail">IM 对话 ID：<code>' + escapeHtml(binding.chatId) + '</code></div>'
+          +   '<div class="binding-detail">当前绑定会话：<code>' + escapeHtml(binding.currentSessionId.slice(0, 8)) + '...</code> · ' + escapeHtml(binding.currentSessionName) + '</div>'
           +   '<div class="binding-detail">当前目标：' + escapeHtml(binding.currentTargetLabel || '未绑定') + '</div>'
           +   '<div class="binding-detail">当前 thread：<code>' + escapeHtml(binding.currentThreadId || 'not-shared') + '</code></div>'
           +   '<div class="binding-detail">运行状态：' + escapeHtml(bindingRuntimeText(binding)) + '</div>'
@@ -3520,10 +3536,9 @@ function renderHtml(): string {
           + '</div>'
           + '<div class="panel-block">'
           +   '<p class="panel-subtitle">当前绑定</p>'
+          + '<p class="small">默认接收全部未归档会话，新会话自动订阅。在操作列可逐条取消或开启订阅，当前绑定会话只决定消息发往哪里。</p>'
           +   bindingsHtml
-          + '</div>'
-          + '<div class="panel-block" id="notificationSubscriptionPanel"></div>';
-        void renderNotificationPanel(channel.id);
+          + '</div>';
       }
 
       function renderChannelsWorkspace() {
@@ -3618,7 +3633,6 @@ function renderHtml(): string {
       ${RUNTIME_CONTROL_SCRIPT}
       ${FEISHU_REGISTRATION_SCRIPT}
       ${FEISHU_TEMPLATE_SCRIPT}
-      ${NOTIFICATION_PANEL_SCRIPT}
 
       async function loadStatus() {
         const status = await api('/api/status');
@@ -3959,6 +3973,19 @@ function renderHtml(): string {
             });
             renderBindings(result);
             showMessage('channelMessage', 'success', '聊天绑定已解绑。');
+            return;
+          }
+          if (target.dataset.action === 'toggle-binding-subscription') {
+            target.disabled = true;
+            try {
+              await api('/api/notification-subscriptions', {method:'POST',body:JSON.stringify({channelId:target.dataset.channelId,chatId:target.dataset.chatId,target:target.dataset.threadId,enabled:target.dataset.enabled==='true'})});
+              const result=await api('/api/bindings');
+              state.bindings=result.bindings || [];state.bindingOptions=result.options || [];
+              const binding=state.bindings.find(b=>b.id===target.dataset.bindingId);
+              const table=target.closest('.binding-table-wrap');
+              if(binding && table)table.outerHTML=renderBindingTable(binding);
+              showMessage('channelMessage','success',target.dataset.enabled==='true'?'已开启订阅，当前绑定会话不变。':'已取消订阅，当前绑定会话不变。');
+            } finally {target.disabled=false;}
             return;
           }
           if (target.dataset.action === 'switch-binding-target') {

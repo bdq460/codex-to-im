@@ -1,3 +1,5 @@
+import { syncAutomaticNotifications } from './automatic-notification-runtime.js';
+import { notificationChatAddresses } from './notification-subscriptions.js';
 import { deliverSubscribedResponse } from './subscribed-response-delivery.js';
 import { initializeChatSubscriptions } from './notification-subscriptions.js';
 import { sendSessionPicker } from './session-navigation.js';
@@ -556,6 +558,16 @@ function consumeBufferedMirrorTurns(
   return consumeBufferedMirrorTurnsBase(subscription, timeoutMs, nowMs, MIRROR_TURN_HOOKS);
 }
 
+let automaticNotificationDiscovery: Parameters<typeof syncAutomaticNotifications>[2];
+function syncAutomaticNotificationTargets(): void {
+  const {store}=getBridgeContext();
+  const addresses=notificationChatAddresses(store).filter(a=>{
+    const adapter=getState().adapters.get(a.channelType);
+    return adapter && adapter.isAuthorized(a.userId || '',a.chatId);
+  });
+  syncAutomaticNotifications(store,addresses,automaticNotificationDiscovery);
+}
+
 const MIRROR_RUNTIME = createMirrorRuntime(getState, {
   watchDebounceMs: MIRROR_WATCH_DEBOUNCE_MS,
   danglingThreadRetryLimit: DANGLING_MIRROR_THREAD_RETRY_LIMIT,
@@ -563,6 +575,7 @@ const MIRROR_RUNTIME = createMirrorRuntime(getState, {
   failureSuspendMs: MIRROR_FAILURE_SUSPEND_MS,
   streamOrphanTimeoutMs: MIRROR_STREAM_ORPHAN_TIMEOUT_MS,
 }, {
+  syncNotificationSubscriptions: syncAutomaticNotificationTargets,
   nowIso,
   describeUnknownError,
   getDesktopSessionByThreadIdSafe,
@@ -1077,7 +1090,7 @@ async function handleMessage(
       releaseInteractiveTask: (sessionId, taskId) => INTERACTIVE_RUNTIME.releaseInteractiveTask(sessionId, taskId),
       releaseBridgeTurn: (sessionId, taskId) => TURN_COORDINATOR.releaseSessionTurn(sessionId, taskId),
       deliverResponse,
-      notifySubscribers: (response) => deliverSubscribedResponse(store, msg.address, binding!.codepilotSessionId, response, channel => getState().adapters.get(channel) || null),
+      notifySubscribers: (response) => { syncAutomaticNotificationTargets(); return deliverSubscribedResponse(store, msg.address, binding!.codepilotSessionId, response, channel => getState().adapters.get(channel) || null); },
       persistSdkSessionUpdate,
       desktopTerminalFinalizationTimeoutMs: DESKTOP_TERMINAL_FINALIZATION_TIMEOUT_MS,
   });
@@ -1184,6 +1197,7 @@ function resetStateForTests(): void {
 // without wiring up the full adapter loop.
 /** @internal */
 export const _testOnly = {
+  setAutomaticNotificationDiscovery: (discover: Parameters<typeof syncAutomaticNotifications>[2]) => { automaticNotificationDiscovery = discover; },
   handleMessage,
   syncConfiguredAdapters: (options: { startLoops: boolean }) => ADAPTER_RUNTIME.syncConfiguredAdapters(options),
   reconcileMirrorSubscriptions,

@@ -55,6 +55,7 @@ export interface CreateMirrorRuntimeOptions {
 }
 
 export interface CreateMirrorRuntimeDeps {
+  syncNotificationSubscriptions?(): void;
   nowIso(): string;
   describeUnknownError(error: unknown): string;
   getDesktopSessionByThreadIdSafe(threadId: string, context: string): DesktopSessionSummary | null;
@@ -317,6 +318,7 @@ export function createMirrorRuntime(
   function syncMirrorSubscriptionSet(): void {
     const { store } = getBridgeContext();
     const state = getState();
+    deps.syncNotificationSubscriptions?.();
     const currentBindings = store.listChannelBindings();
     const addresses = new Map(currentBindings.map(b => [JSON.stringify([b.channelType,b.chatId]), b]));
     for (const [key] of observedSendingBindings) {

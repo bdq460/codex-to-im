@@ -35,8 +35,8 @@ describe('message-driven sessions', () => {
       router.bindToSession(f.address, later.id);
       assert.equal(await a.finalizeCard(f.address.chatId, 'completed', '完成', streamKey), true);
       assert.equal(sessionForMessage(f.address, `${kind}-result`), original.id);
-      assert.match(JSON.stringify(updated), /设为当前会话/); assert.match(JSON.stringify(updated), /原会话/);
-      const callback = updated.body.elements.flatMap((e: any) => e.columns || []).flatMap((c: any) => c.elements || []).find((b: any) => b.text?.content === '设为当前会话').value.callback_data;
+      assert.match(JSON.stringify(updated), /绑定此会话/); assert.match(JSON.stringify(updated), /取消订阅/); assert.match(JSON.stringify(updated), /原会话/);
+      const callback = updated.body.elements.flatMap((e: any) => e.columns || []).flatMap((c: any) => c.elements || []).find((b: any) => b.text?.content === '绑定此会话').value.callback_data;
       assert.equal((decodeSessionAction(callback, f.address) as any).sessionId, original.id);
     });
   }
@@ -140,7 +140,7 @@ describe('message-driven sessions', () => {
   it('normal fallback responses render both actions and persist their session', async () => {
     const f = setup(); const s = f.store.createSession('A', '', '', '/tmp');
     const result = await deliverTextResponse(f.adapter, f.address, '完成', s.id);
-    assert.deepEqual(f.sent[0].inlineButtons.flat().map((b: any) => b.text), ['设为当前会话', '选择其它会话']);
+    assert.deepEqual(f.sent[0].inlineButtons.flat().map((b: any) => b.text), ['绑定此会话', '取消订阅', '选择其它会话']);
     assert.equal(sessionForMessage(f.address, result.messageId!), s.id);
   });
   it('includes formal IM sessions in recent activity order and excludes drafts', () => {

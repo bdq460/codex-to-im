@@ -5,10 +5,11 @@ import { CTI_HOME } from '../../config.js';
 import { withFileLock } from '../../file-lock.js';
 import { atomicWriteFileSync } from '../../atomic-file.js';
 import type { BridgeStore } from './host.js';
-import type { ChannelAddress, ChannelBinding } from './types.js';
+import type { ChannelAddress } from './types.js';
 
 export type NotificationSubscription = { id: string; channelType: string; chatId: string; userId?: string; sessionId: string; since: string; lastDeliveredAt?: string };
-type Data = { chats: Record<string, NotificationSubscription[]> };
+type Rule = { excluded: string[]; userId?: string };
+type Data = { chats: Record<string, NotificationSubscription[]>; rules?: Record<string, Rule> };
 const file = path.join(CTI_HOME, 'data', 'notification-subscriptions.json');
 const key = (a: Pick<ChannelAddress, 'channelType' | 'chatId'>) => JSON.stringify([a.channelType, a.chatId]);
 function read(): Data {
@@ -17,7 +18,7 @@ function read(): Data {
 }
 function mutate<T>(fn: (data: Data) => T): T {
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  return withFileLock(file, () => { const data = read(); const result = fn(data); atomicWriteFileSync(file, JSON.stringify(data)); fs.chmodSync(file, 0o600); return result; });
+  return withFileLock(file, () => { const data = read(); const before = JSON.stringify(data); const result = fn(data); if (JSON.stringify(data) !== before) { atomicWriteFileSync(file, JSON.stringify(data)); fs.chmodSync(file, 0o600); } return result; });
 }
 function legacy(store: BridgeStore, address: ChannelAddress): NotificationSubscription[] {
   const b = store.getChannelBinding(address.channelType, address.chatId);
@@ -38,10 +39,14 @@ export function setNotificationSubscription(store: BridgeStore, address: Channel
   const session = store.getSession(sessionId);
   if (enabled && (!session || session.hidden || session.parent_session_id || session.session_type === 'draft' || (session.expires_at && Date.parse(session.expires_at) <= Date.now()))) throw new Error('会话不可用，请刷新会话列表。');
   mutate(data => {
+    const rules = data.rules ??= {};
+    const rule = rules[key(address)] ??= {excluded:[],userId:address.userId};
+    if (address.userId) rule.userId = address.userId;
+    const target = session?.desktop_thread_id || sessionId;
+    rule.excluded = enabled ? rule.excluded.filter(id=>id !== target) : [...new Set([...rule.excluded,target])];
     const rows = data.chats[key(address)] ??= legacy(store, address);
     const existing = rows.find(r => r.sessionId === sessionId);
     if (enabled && !existing) {
-      if (rows.length >= 50) throw new Error('每个聊天最多订阅 50 个会话，请先取消不用的订阅。');
       rows.push({ id: `notify:${crypto.randomUUID()}`, channelType: address.channelType, chatId: address.chatId, userId: address.userId, sessionId, since: new Date().toISOString() });
     } else if (!enabled) data.chats[key(address)] = rows.filter(r => r.sessionId !== sessionId);
   });
@@ -65,7 +70,32 @@ export function notificationChatAddresses(store: BridgeStore): ChannelAddress[] 
   for (const [k, rows] of Object.entries(read().chats)) {
     if (addresses.has(k)) continue;
     const [channelType, chatId] = JSON.parse(k) as [string,string];
-    addresses.set(k, {channelType,chatId,userId:rows[0]?.userId});
+    addresses.set(k, {channelType,chatId,userId:rows[0]?.userId || read().rules?.[k]?.userId});
   }
   return [...addresses.values()];
+}
+
+export function notificationPolicy(address: ChannelAddress) {
+  return { automatic: true as const, excluded: read().rules?.[key(address)]?.excluded || [] };
+}
+export function isNotificationSubscribed(store: BridgeStore, address: ChannelAddress, targetId: string): boolean {
+  const session = store.getSession(targetId) || store.findSessionBySdkSessionId(targetId);
+  return !notificationPolicy(address).excluded.includes(session?.desktop_thread_id || targetId);
+}
+/** Runtime reconciliation only: reads and health endpoints never discover or write targets. */
+export function reconcileNotificationTargets(store: BridgeStore, addresses: ChannelAddress[], sessionIds: string[]): void {
+  mutate(data => {
+    const rules = data.rules ??= {};
+    for (const address of addresses) {
+      const scope = key(address);
+      const rule = rules[scope] ??= {excluded:[],userId:address.userId};
+      if (address.userId) rule.userId = address.userId;
+      const eligible = sessionIds.filter(id => { const session=store.getSession(id);return session && !rule.excluded.includes(session.desktop_thread_id || id); });
+      const ids = new Set(eligible);
+      const rows = (data.chats[scope] ?? legacy(store,address)).filter(r=>ids.has(r.sessionId));
+      const existing = new Set(rows.map(r=>r.sessionId));
+      for (const sessionId of eligible) if (!existing.has(sessionId)) rows.push({id:`notify:${crypto.randomUUID()}`,channelType:address.channelType,chatId:address.chatId,userId:rule.userId,sessionId,since:new Date().toISOString()});
+      data.chats[scope] = rows;
+    }
+  });
 }

@@ -33,12 +33,12 @@ describe('session navigation', () => {
   it('offers three recent sessions, new and full list without executing the input', () => {
     const sessions = Array.from({ length: 9 }, (_, i) => ({ threadId: id, title: `会话${i}`, cwd: '/projects/app' }));
     const picker = buildSessionPicker(address, sessions, { unbound: true, recent: true, pendingId: 'queued-message' });
-    assert.match(picker.text, /当前发送：未选择/);
+    assert.match(picker.text, /当前绑定会话：未选择/);
     assert.match(picker.text, /原消息已保留/);
     assert.equal(picker.inlineButtons.flat().filter(b => b.text === '在此会话继续原消息').length, 3);
     assert.ok(picker.inlineButtons.flat().some(b => b.text === '全部会话'));
     const next = buildSessionPicker(address, sessions, { offset: 6 });
-    assert.equal(next.inlineButtons.flat().filter(b => b.text === '设为当前').length, 3);
+    assert.equal(next.inlineButtons.flat().filter(b => b.text === '绑定此会话').length, 3);
     assert.ok(next.inlineButtons.flat().some(b => b.text === '上一页'));
     assert.ok(!next.inlineButtons.flat().some(b => b.text === '下一页'));
     const card = JSON.parse(buildActionCard(picker.text, picker.inlineButtons, address.chatId));
@@ -118,7 +118,7 @@ describe('session navigation', () => {
       const adapter: any = { channelType: address.channelType, provider: 'feishu', send: async (m: any) => { sent.push(m); return { ok: true, messageId: 'notice-1' }; } };
       await _testOnly.handleMessage(adapter, { address: { ...address, chatId: 'unbound-test' }, messageId: 'incoming-1', text: '帮我检查', timestamp: Date.now() });
       assert.equal(calls, 0); assert.equal(store.getChannelBinding(address.channelType, 'unbound-test'), null);
-      assert.match(sent[0].text, /当前发送：未选择/);
+      assert.match(sent[0].text, /当前绑定会话：未选择/);
       assert.ok(sent[0].inlineButtons.length);
     } finally { if (old === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = old; fs.rmSync(home, { recursive: true, force: true }); }
   });
