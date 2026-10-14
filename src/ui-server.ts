@@ -1,3 +1,6 @@
+import { FEISHU_TEMPLATE_HTML, FEISHU_TEMPLATE_SCRIPT } from './ui-feishu-template.js';
+import { readFeishuTemplate, saveFeishuTemplate, FeishuTemplateError } from './feishu-template-store.js';
+import { FEISHU_REFERENCE_PROFILE } from './feishu-reference-profile.js';
 import { inspectFeishuConfiguration } from './feishu-app-profile.js';
 import { RUNTIME_CONTROL_SCRIPT } from './ui-runtime-controls.js';
 import { FEISHU_REGISTRATION_SCRIPT } from './ui-feishu-registration.js';
@@ -2339,6 +2342,7 @@ function renderHtml(): string {
             </div>
           </div>
 
+          ${FEISHU_TEMPLATE_HTML}
           <section class="panel" id="config">
             <div class="panel-header">
               <div>
@@ -2566,7 +2570,7 @@ function renderHtml(): string {
     <div id="globalMessageHost" class="global-message-host" aria-live="polite"></div>
 
     <style>[hidden]{display:none!important}#feishuRegistrationDialog{border:1px solid #dde2eb;border-radius:14px;max-width:420px;padding:24px}#feishuRegistrationDialog::backdrop{background:#10182855}#feishuRegistrationQr{text-align:center;margin:16px 0}</style>
-<dialog id="feishuRegistrationDialog" aria-labelledby="feishuRegistrationTitle"><h2 id="feishuRegistrationTitle">扫码添加飞书机器人</h2><p>按现有机器人配置预填权限、事件与卡片回调。用飞书扫码，在手机上确认创建与授权。</p><div id="feishuRegistrationQr"></div><div id="feishuRegistrationConfiguration"></div><p id="feishuRegistrationStatus" role="status"></p><a id="feishuRegistrationLink" hidden target="_blank" rel="noopener noreferrer">在飞书授权页面继续</a><p class="small">创建机器人可能需要企业管理员批准。已有机器人可关闭后手动填写凭据。</p><button id="feishuRegistrationRetry" type="button">重新生成二维码</button><button id="feishuRegistrationClose" type="button">关闭</button></dialog>
+<dialog id="feishuRegistrationDialog" aria-labelledby="feishuRegistrationTitle"><h2 id="feishuRegistrationTitle">扫码添加飞书机器人</h2><p>使用已保存的飞书机器人配置模板申请权限、事件与卡片回调。用飞书扫码，在手机上确认创建与授权。</p><div id="feishuRegistrationQr"></div><div id="feishuRegistrationConfiguration"></div><p id="feishuRegistrationStatus" role="status"></p><a id="feishuRegistrationLink" hidden target="_blank" rel="noopener noreferrer">在飞书授权页面继续</a><p class="small">创建机器人可能需要企业管理员批准。已有机器人可关闭后手动填写凭据。</p><button id="feishuRegistrationRetry" type="button">重新生成二维码</button><button id="feishuRegistrationClose" type="button">关闭</button></dialog>
 <script>
       const state = {
         config: null,
@@ -3610,6 +3614,7 @@ function renderHtml(): string {
 
       ${RUNTIME_CONTROL_SCRIPT}
       ${FEISHU_REGISTRATION_SCRIPT}
+      ${FEISHU_TEMPLATE_SCRIPT}
 
       async function loadStatus() {
         const status = await api('/api/status');
@@ -4365,11 +4370,19 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
+    if (url.pathname === '/api/feishu-template' && (request.method === 'GET' || request.method === 'POST')) {
+      try {
+        if (request.method === 'GET') json(response, 200, { template: readFeishuTemplate(), defaults: FEISHU_REFERENCE_PROFILE });
+        else { const payload = await readJsonBody<Record<string, unknown>>(request); json(response, 200, { template: saveFeishuTemplate(payload.profile, payload.revision) }); }
+      } catch (error) { if (error instanceof FeishuTemplateError) throw new HttpRequestError(error.statusCode, error.message); throw error; }
+      return;
+    }
+
     if (request.method === 'POST' && url.pathname === '/api/channels/feishu-configuration/check') {
       const payload = await readJsonBody<Record<string, unknown>>(request);
       const channel = findChannelInstance(asString(payload.channelId) || '', loadConfig());
       if (!channel || channel.provider !== 'feishu') throw new HttpRequestError(404, '请先保存飞书通道。');
-      const report = await inspectFeishuConfiguration(channel.config as FeishuChannelConfig);
+      const report = await inspectFeishuConfiguration(channel.config as FeishuChannelConfig, undefined, readFeishuTemplate().profile);
       json(response, 200, { report }); return;
     }
 
@@ -4438,7 +4451,7 @@ const server = http.createServer(async (request, response) => {
       const payload = await readJsonBody<Record<string, unknown>>(request);
       const alias = normalizeChannelAlias(asString(payload.alias), 'feishu');
       const site = normalizeFeishuSite(asString(payload.site));
-      const session = await feishuRegistration.begin({ alias, site, save: async (credentials) => {
+      const session = await feishuRegistration.begin({ alias, site, profile: readFeishuTemplate().profile, save: async (credentials) => {
         const latest = loadConfig();
         if ((latest.channels || []).some(channel => channel.provider === 'feishu' && (channel.config as FeishuChannelConfig).appId === credentials.appId)) return;
         const merged = mergeChannelInstance({ provider: 'feishu', alias, enabled: true, ...credentials,

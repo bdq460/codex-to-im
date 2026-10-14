@@ -51,8 +51,8 @@ export function compareFeishuConfiguration(app: AppMetadata, version: PublishedV
   const status = checks.some(c => c.status === 'missing') ? 'needs_configuration' : checks.some(c => c.status === 'unknown') ? 'needs_confirmation' : 'ready';
   return { status, message: status === 'ready' ? '权限、事件及回调配置检查通过。' : status === 'needs_configuration' ? '通道已保存，但飞书配置尚未齐全。' : '可读取配置与参照相符，部分字段仍需到飞书确认。', referenceVersion: profile.referenceVersion, version: version?.version, checks, missingScopes, ungrantedScopes, missingEvents, missingCallbacks };
 }
-export async function inspectFeishuConfiguration(config: FeishuChannelConfig, request: typeof fetch = fetch): Promise<FeishuConfigurationReport> {
-  const unknown = (message: string): FeishuConfigurationReport => ({ status: 'unverified', message, referenceVersion: FEISHU_REFERENCE_PROFILE.referenceVersion, checks: [], missingScopes: [], missingEvents: [], missingCallbacks: [], managementUrl: config.appId ? `https://${config.site === 'lark' ? 'open.larksuite.com' : 'open.feishu.cn'}/app/${encodeURIComponent(config.appId)}` : undefined });
+export async function inspectFeishuConfiguration(config: FeishuChannelConfig, request: typeof fetch = fetch, profile = FEISHU_REFERENCE_PROFILE): Promise<FeishuConfigurationReport> {
+  const unknown = (message: string): FeishuConfigurationReport => ({ status: 'unverified', message, referenceVersion: profile.referenceVersion, checks: [], missingScopes: [], missingEvents: [], missingCallbacks: [], managementUrl: config.appId ? `https://${config.site === 'lark' ? 'open.larksuite.com' : 'open.feishu.cn'}/app/${encodeURIComponent(config.appId)}` : undefined });
   if (!config.appId || !config.appSecret) return unknown('请先保存有效的机器人凭据。');
   const base = feishuSiteToApiBaseUrl(config.site);
   try {
@@ -69,6 +69,6 @@ export async function inspectFeishuConfiguration(config: FeishuChannelConfig, re
     const version = app.online_version_id ? (await get(`/open-apis/application/v6/applications/${encodeURIComponent(config.appId)}/app_versions/${encodeURIComponent(app.online_version_id)}?lang=zh_cn`))?.app_version || null : null;
     let grants: ScopeGrant[] | null = null;
     try { grants = (await get('/open-apis/application/v6/scopes'))?.scopes || null; } catch { /* Unknown is shown, never treated as authorized. */ }
-    return { ...compareFeishuConfiguration(app, version, FEISHU_REFERENCE_PROFILE, grants), managementUrl: `https://${config.site === 'lark' ? 'open.larksuite.com' : 'open.feishu.cn'}/app/${encodeURIComponent(config.appId)}` };
+    return { ...compareFeishuConfiguration(app, version, profile, grants), managementUrl: `https://${config.site === 'lark' ? 'open.larksuite.com' : 'open.feishu.cn'}/app/${encodeURIComponent(config.appId)}` };
   } catch { return unknown('配置检查暂不可用，可能是网络或查询权限不足。请重试或打开飞书后台核对。'); }
 }

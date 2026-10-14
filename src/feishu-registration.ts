@@ -1,4 +1,5 @@
-import { registrationPresetUrl, inspectFeishuConfiguration, type FeishuConfigurationReport } from './feishu-app-profile.js';
+import { registrationPresetUrl, inspectFeishuConfiguration, type FeishuAppProfile, type FeishuConfigurationReport } from './feishu-app-profile.js';
+import { FEISHU_REFERENCE_PROFILE } from './feishu-reference-profile.js';
 import crypto from 'node:crypto';
 import QRCode from 'qrcode';
 import type { FeishuSite } from './config.js';
@@ -9,7 +10,7 @@ type RegistrationResponse = {
   client_id?: string; client_secret?: string; user_info?: { open_id?: string; tenant_brand?: string };
 };
 type Credentials = { appId: string; appSecret: string; site: FeishuSite; ownerId?: string };
-type Options = { alias: string; site: FeishuSite; save: (credentials: Credentials) => Promise<void> };
+type Options = { profile?: FeishuAppProfile; alias: string; site: FeishuSite; save: (credentials: Credentials) => Promise<void> };
 type Session = Options & { id: string; deviceCode: string; qrSvg: string; verificationUrl: string; expiresAt: number; interval: number; nextPollAt: number; status: 'waiting' | 'confirmed' | 'expired' | 'denied' | 'failed'; message: string; configuration?: FeishuConfigurationReport; inFlight?: Promise<void> };
 const bases = { feishu: 'https://accounts.feishu.cn', lark: 'https://accounts.larksuite.com' };
 export async function registrationCall(site: FeishuSite, action: string, params: Record<string, string> = {}): Promise<RegistrationResponse> {
@@ -30,13 +31,14 @@ export class FeishuRegistration {
   async begin(options: Options) {
     for (const [id, s] of this.sessions) if (s.expiresAt < this.now()) this.sessions.delete(id);
     if (this.sessions.size >= 20) throw new Error('扫码会话过多，请关闭不用的扫码窗口后重试。');
+    options = { ...options, profile: structuredClone(options.profile || FEISHU_REFERENCE_PROFILE) };
     const init = await this.call(options.site, 'init');
     if (init.error) throw new Error('飞书扫码初始化失败，请重试或使用手动配置。');
     const data = await this.call(options.site, 'begin', { archetype: 'PersonalAgent', auth_method: 'client_secret', request_user_info: 'open_id' });
     if (data.error || !data.device_code || !data.verification_uri_complete) throw new Error('飞书扫码入口暂不可用，请重试或使用手动配置。');
     const url = new URL(data.verification_uri_complete);
     if (url.protocol !== 'https:' || !['feishu.cn', 'larksuite.com'].some(host => url.hostname === host || url.hostname.endsWith('.' + host))) throw new Error('飞书返回了无效授权地址。');
-    const configuredUrl = registrationPresetUrl(url, options.alias);
+    const configuredUrl = registrationPresetUrl(url, options.alias, options.profile);
     const session: Session = { ...options, id: crypto.randomUUID(), deviceCode: data.device_code,
       qrSvg: await QRCode.toString(configuredUrl.href, { type: 'svg', width: 256 }), verificationUrl: configuredUrl.href,
       expiresAt: this.now() + Math.min(1800, Math.max(60, data.expire_in || data.expires_in || 600)) * 1000,
@@ -62,7 +64,7 @@ export class FeishuRegistration {
     if (typeof data.client_id === 'string' && data.client_id && typeof data.client_secret === 'string' && data.client_secret) {
       try {
         await s.save({ appId: data.client_id, appSecret: data.client_secret, site: s.site, ownerId: data.user_info?.open_id });
-        s.status = 'confirmed'; s.deviceCode = ''; s.configuration = await this.inspect({ appId: data.client_id, appSecret: data.client_secret, site: s.site });
+        s.status = 'confirmed'; s.deviceCode = ''; s.configuration = await this.inspect({ appId: data.client_id, appSecret: data.client_secret, site: s.site }, undefined, s.profile);
         s.message = '飞书通道已保存。' + s.configuration.message;
       } catch { s.status = 'failed'; s.message = '授权已完成，但本地保存失败。请重新扫码或手动配置，避免重复创建机器人。'; }
       return;
