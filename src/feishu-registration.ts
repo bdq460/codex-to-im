@@ -1,3 +1,4 @@
+import { registrationPresetUrl, inspectFeishuConfiguration, type FeishuConfigurationReport } from './feishu-app-profile.js';
 import crypto from 'node:crypto';
 import QRCode from 'qrcode';
 import type { FeishuSite } from './config.js';
@@ -9,7 +10,7 @@ type RegistrationResponse = {
 };
 type Credentials = { appId: string; appSecret: string; site: FeishuSite; ownerId?: string };
 type Options = { alias: string; site: FeishuSite; save: (credentials: Credentials) => Promise<void> };
-type Session = Options & { id: string; deviceCode: string; qrSvg: string; verificationUrl: string; expiresAt: number; interval: number; nextPollAt: number; status: 'waiting' | 'confirmed' | 'expired' | 'denied' | 'failed'; message: string; inFlight?: Promise<void> };
+type Session = Options & { id: string; deviceCode: string; qrSvg: string; verificationUrl: string; expiresAt: number; interval: number; nextPollAt: number; status: 'waiting' | 'confirmed' | 'expired' | 'denied' | 'failed'; message: string; configuration?: FeishuConfigurationReport; inFlight?: Promise<void> };
 const bases = { feishu: 'https://accounts.feishu.cn', lark: 'https://accounts.larksuite.com' };
 export async function registrationCall(site: FeishuSite, action: string, params: Record<string, string> = {}): Promise<RegistrationResponse> {
   const response = await fetch(`${bases[site]}/oauth/v1/app/registration`, {
@@ -22,9 +23,9 @@ export async function registrationCall(site: FeishuSite, action: string, params:
 }
 export class FeishuRegistration {
   private sessions = new Map<string, Session>();
-  constructor(private call = registrationCall, private now = Date.now) {}
+  constructor(private call = registrationCall, private now = Date.now, private inspect = inspectFeishuConfiguration) {}
   private view(s: Session) {
-    return { id: s.id, qrSvg: s.qrSvg, verificationUrl: s.verificationUrl, expiresAt: s.expiresAt, interval: s.interval, status: s.status, message: s.message };
+    return { id: s.id, qrSvg: s.qrSvg, verificationUrl: s.verificationUrl, expiresAt: s.expiresAt, interval: s.interval, status: s.status, message: s.message, configuration: s.configuration };
   }
   async begin(options: Options) {
     for (const [id, s] of this.sessions) if (s.expiresAt < this.now()) this.sessions.delete(id);
@@ -35,8 +36,9 @@ export class FeishuRegistration {
     if (data.error || !data.device_code || !data.verification_uri_complete) throw new Error('飞书扫码入口暂不可用，请重试或使用手动配置。');
     const url = new URL(data.verification_uri_complete);
     if (url.protocol !== 'https:' || !['feishu.cn', 'larksuite.com'].some(host => url.hostname === host || url.hostname.endsWith('.' + host))) throw new Error('飞书返回了无效授权地址。');
+    const configuredUrl = registrationPresetUrl(url, options.alias);
     const session: Session = { ...options, id: crypto.randomUUID(), deviceCode: data.device_code,
-      qrSvg: await QRCode.toString(url.href, { type: 'svg', width: 256 }), verificationUrl: url.href,
+      qrSvg: await QRCode.toString(configuredUrl.href, { type: 'svg', width: 256 }), verificationUrl: configuredUrl.href,
       expiresAt: this.now() + Math.min(1800, Math.max(60, data.expire_in || data.expires_in || 600)) * 1000,
       interval: Math.min(30, Math.max(2, data.interval || 5)), nextPollAt: 0, status: 'waiting', message: '请用飞书扫码，在手机上确认创建与授权。' };
     this.sessions.set(session.id, session); return this.view(session);
@@ -60,7 +62,8 @@ export class FeishuRegistration {
     if (typeof data.client_id === 'string' && data.client_id && typeof data.client_secret === 'string' && data.client_secret) {
       try {
         await s.save({ appId: data.client_id, appSecret: data.client_secret, site: s.site, ownerId: data.user_info?.open_id });
-        s.status = 'confirmed'; s.deviceCode = ''; s.message = '飞书通道已添加。机器人权限和发布状态请在飞书确认；工作台可测试连接。';
+        s.status = 'confirmed'; s.deviceCode = ''; s.configuration = await this.inspect({ appId: data.client_id, appSecret: data.client_secret, site: s.site });
+        s.message = '飞书通道已保存。' + s.configuration.message;
       } catch { s.status = 'failed'; s.message = '授权已完成，但本地保存失败。请重新扫码或手动配置，避免重复创建机器人。'; }
       return;
     }

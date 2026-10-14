@@ -11,3 +11,7 @@
 2026-10-14 工作台控制与通道添加：运行按钮跟随停止/运行/过渡状态，客户端防重复、后端串行操作，不在启停时隐式保存配置；周期状态读取不重绘配置表单。微信登录入口判断加入CLI文件名校验，修复打包后ui-server/cli误启动扫码并弹出file页面。新增feishu-registration设备授权与工作台扫码弹窗，凭据服务端保存、关闭取消轮询、失败/过期可重试，保留手动配置。唯一新模块ui-operation、ui-runtime-controls、ui-feishu-registration及feishu-registration；验证及部署边界见docs/local-changes/2026-10-14-workbench-onboarding.md。
 
 本轮工作台更新已本机安装，仅刷新UI，bridge与会话绑定保持；50项定向测试、typecheck/build及真实页面按钮/二维码/取消验证通过，手机扫码创建与授权待用户完成。
+
+2026-10-14 飞书扫码配置对齐：以当前参考机器人的已发布1.0.6权限与事件、应用信息回调及租户授权实时回读生成feishu-reference-profile（105权限名/115身份组合、12事件、1卡片回调，不含凭据及身份ID）。扫码使用官方SDK兼容gzip/base64url addons、preset=false、createOnly=true；创建后及已保存通道可回读已发布权限/事件、租户授权、回调/接收方式并展示缺项/未知字段。平台未返回的事件接收方式不判通过，提供后台入口；未自动审批/发版，不复制旧菜单、Webhook安全密钥或租户数据范围。实现与证据见docs/local-changes/2026-10-14-feishu-profile-alignment.md。
+
+对齐更新已本机部署，仅刷新UI；23项定向测试/typecheck/build、真实参照回读与二维码生成以及正式页面检查按钮通过。新机器人扫码授权后的最终配置尚待实际创建回读；事件模式未返回时界面明确待确认。

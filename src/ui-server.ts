@@ -1,3 +1,4 @@
+import { inspectFeishuConfiguration } from './feishu-app-profile.js';
 import { RUNTIME_CONTROL_SCRIPT } from './ui-runtime-controls.js';
 import { FEISHU_REGISTRATION_SCRIPT } from './ui-feishu-registration.js';
 import { FeishuRegistration } from './feishu-registration.js';
@@ -2565,7 +2566,7 @@ function renderHtml(): string {
     <div id="globalMessageHost" class="global-message-host" aria-live="polite"></div>
 
     <style>[hidden]{display:none!important}#feishuRegistrationDialog{border:1px solid #dde2eb;border-radius:14px;max-width:420px;padding:24px}#feishuRegistrationDialog::backdrop{background:#10182855}#feishuRegistrationQr{text-align:center;margin:16px 0}</style>
-<dialog id="feishuRegistrationDialog" aria-labelledby="feishuRegistrationTitle"><h2 id="feishuRegistrationTitle">扫码添加飞书机器人</h2><p>用飞书扫码，在手机上确认创建与授权。凭据会自动保存到本机。</p><div id="feishuRegistrationQr"></div><p id="feishuRegistrationStatus" role="status"></p><a id="feishuRegistrationLink" hidden target="_blank" rel="noopener noreferrer">在飞书授权页面继续</a><p class="small">创建机器人可能需要企业管理员批准。已有机器人可关闭后手动填写凭据。</p><button id="feishuRegistrationRetry" type="button">重新生成二维码</button><button id="feishuRegistrationClose" type="button">关闭</button></dialog>
+<dialog id="feishuRegistrationDialog" aria-labelledby="feishuRegistrationTitle"><h2 id="feishuRegistrationTitle">扫码添加飞书机器人</h2><p>按现有机器人配置预填权限、事件与卡片回调。用飞书扫码，在手机上确认创建与授权。</p><div id="feishuRegistrationQr"></div><div id="feishuRegistrationConfiguration"></div><p id="feishuRegistrationStatus" role="status"></p><a id="feishuRegistrationLink" hidden target="_blank" rel="noopener noreferrer">在飞书授权页面继续</a><p class="small">创建机器人可能需要企业管理员批准。已有机器人可关闭后手动填写凭据。</p><button id="feishuRegistrationRetry" type="button">重新生成二维码</button><button id="feishuRegistrationClose" type="button">关闭</button></dialog>
 <script>
       const state = {
         config: null,
@@ -2831,7 +2832,7 @@ function renderHtml(): string {
         item.className = 'global-message ' + (type || 'success');
         const icon = document.createElement('span');
         icon.className = 'global-message-icon';
-        icon.textContent = type === 'error' ? '!' : '✓';
+        icon.textContent = type === 'error' ? '!' : type === 'info' ? 'i' : '✓';
 
         const content = document.createElement('div');
         content.className = 'global-message-content';
@@ -3434,6 +3435,8 @@ function renderHtml(): string {
             + '<div class="editor-section">'
             +   '<p class="editor-section-title">连接配置</p>'
             +   '<button type="button" data-action="channel-feishu-scan">扫码添加飞书机器人</button>'
+            +   (!String(channel.id || '').startsWith('__draft__:') ? '<button type="button" data-action="channel-feishu-check">检查权限、事件与回调</button>' : '')
+            +   '<div id="feishuConfigurationReport"></div>'
             +   '<p class="small">推荐扫码创建新机器人。已有机器人可在下方手动填写凭据；扫码不会替换原通道。</p>'
             +   '<div class="field-row">'
             +     '<label>App ID<input id="channelAppId" value="' + escapeHtml(feishu.appId || '') + '" /></label>'
@@ -3909,6 +3912,14 @@ function renderHtml(): string {
         if (!channel) return;
 
         try {
+          if (target.dataset.action === 'channel-feishu-check') {
+            target.disabled = true;
+            try {
+              const result = await api('/api/channels/feishu-configuration/check', { method: 'POST', body: JSON.stringify({ channelId: channel.id }) });
+              renderFeishuConfigurationReport(result.report, document.getElementById('feishuConfigurationReport'));
+            } finally { target.disabled = false; }
+            return;
+          }
           if (target.dataset.action === 'channel-feishu-scan') { await startFeishuRegistration(); return; }
           if (target.dataset.action === 'channel-save') {
             await saveChannel(channel);
@@ -4352,6 +4363,14 @@ const server = http.createServer(async (request, response) => {
         ...(await buildBindingsPayload(store, loadConfig())),
       });
       return;
+    }
+
+    if (request.method === 'POST' && url.pathname === '/api/channels/feishu-configuration/check') {
+      const payload = await readJsonBody<Record<string, unknown>>(request);
+      const channel = findChannelInstance(asString(payload.channelId) || '', loadConfig());
+      if (!channel || channel.provider !== 'feishu') throw new HttpRequestError(404, '请先保存飞书通道。');
+      const report = await inspectFeishuConfiguration(channel.config as FeishuChannelConfig);
+      json(response, 200, { report }); return;
     }
 
     if (request.method === 'POST' && url.pathname === '/api/channels/test') {
