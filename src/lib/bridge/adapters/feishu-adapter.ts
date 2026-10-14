@@ -284,6 +284,24 @@ export class FeishuAdapter extends BaseChannelAdapter {
     }
     saveSessionCards(this.channelType,this.sessionCards);
   }
+  async updateSessionPicker(address: import('../types.js').ChannelAddress, options: import('../session-navigation.js').PickerOptions, messageId?: string): Promise<boolean> {
+    const previous = this.sessionCardRefreshes.get(address.chatId) || Promise.resolve();
+    const update = previous.catch(()=>{}).then(()=>this.updatePickerCard(address,options,messageId));
+    const completion = update.then(()=>{},()=>{});
+    this.sessionCardRefreshes.set(address.chatId,completion);
+    try { return await update; } finally { if(this.sessionCardRefreshes.get(address.chatId)===completion) this.sessionCardRefreshes.delete(address.chatId); }
+  }
+  private async updatePickerCard(address: import('../types.js').ChannelAddress, options: import('../session-navigation.js').PickerOptions, messageId?: string): Promise<boolean> {
+    const entry = messageId && this.sessionCards.get(messageId);
+    if (!entry || entry.chatId !== address.chatId || !entry.message?.sessionPicker || !this.restClient) return false;
+    const picker = buildSessionPicker(address,selectableSessions(),options);
+    try {
+      const result = await this.withFeishuRequestTimeout(messageId!, 'im.message.patch:session-picker',()=>this.restClient!.im.message.patch({path:{message_id:messageId!},data:{content:buildActionCard(picker.text,picker.navigationButtons,address.chatId,picker.sections)}}));
+      if (result?.code && result.code !== 0) return false;
+      entry.message = {...entry.message,address,text:picker.text,inlineButtons:picker.navigationButtons,sections:picker.sections,sessionPicker:options};
+      saveSessionCards(this.channelType,this.sessionCards);return true;
+    } catch { return false; }
+  }
   private decorateResultCard(card: any, chatId: string, sessionId: string) {
     const address = {channelType:this.channelType,chatId};
     const session = getBridgeContext().store.getSession(sessionId);

@@ -50,7 +50,11 @@ export async function handleSessionAction(adapter: BaseChannelAdapter, msg: Inbo
     await deliverBridgeNotice(adapter, msg.address, '入口已失效，请发送 /t 重新选择。原消息不会自动执行。');
     return;
   }
-  if (action.kind === 'list') { await sendSessionPicker(adapter, msg.address, { offset: action.offset, view: action.view || 'recent', pendingId: action.pendingId }); return; }
+  if (action.kind === 'list') {
+    const options = { offset: action.offset, view: action.view || 'recent' as const, pendingId: action.pendingId };
+    if (!await adapter.updateSessionPicker?.(msg.address, options, msg.callbackMessageId)) await sendSessionPicker(adapter, msg.address, options);
+    return;
+  }
   if (action.kind === 'subscribe') {
     const { store } = getBridgeContext();
     let session = store.getSession(action.threadId) || store.findSessionBySdkSessionId(action.threadId);

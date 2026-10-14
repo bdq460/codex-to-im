@@ -95,3 +95,15 @@ test('unbinding the initial legacy sending session freezes receive settings inst
   assert.equal(f.store.getChannelBinding(f.address.channelType,f.address.chatId),null);
   assert.deepEqual(listChatSubscriptions(f.store,f.address).map(s=>s.sessionId),[f.a.id]);
 });
+
+test('picker views update the existing card instead of sending a new message; result cards open a separate picker',async()=>{
+  const f=fixture();const adapter:any=new FeishuAdapter({id:f.address.channelType,provider:'feishu',alias:'test',enabled:true,config:{appId:'test',appSecret:'test'}});
+  let creates=0,patches=0;
+  adapter.restClient={im:{message:{create:async()=>{creates++;return {data:{message_id:'picker-'+f.address.chatId}};},patch:async()=>{patches++;return {code:0};}}}};
+  const picker=buildSessionPicker(f.address,[],{view:'recent'});
+  await adapter.send({address:f.address,text:picker.text,inlineButtons:picker.navigationButtons,sections:picker.sections,sessionPicker:{view:'recent'}});
+  assert.equal(await adapter.updateSessionPicker(f.address,{view:'all'},'picker-'+f.address.chatId),true);
+  assert.equal(creates,1);assert.equal(patches,1);
+  assert.equal(await adapter.updateSessionPicker({...f.address,chatId:'other'},{view:'all'},'picker-'+f.address.chatId),false);
+  assert.equal(await adapter.updateSessionPicker(f.address,{view:'all'},'unknown-result'),false);
+});
