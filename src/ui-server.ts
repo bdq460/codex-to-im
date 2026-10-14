@@ -2100,7 +2100,20 @@ function renderHtml(): string {
         border-radius: 8px;
         background: #ffffff;
         white-space: nowrap;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 32px;
+        height: 32px;
+        padding: 0;
+        flex: 0 0 32px;
       }
+
+      .binding-actions { display: inline-flex; gap: 6px; }
+      .binding-action-tip { display: inline-flex; }
+      .binding-target-btn svg { width: 17px; height: 17px; }
+      .binding-target-btn:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+      .binding-target-btn.current:disabled { opacity: 1; cursor: default; }
 
       .binding-target-btn.current {
         border-color: rgba(22, 119, 255, 0.30);
@@ -2765,6 +2778,16 @@ function renderHtml(): string {
         return option.label + ' · ' + option.description;
       }
 
+      function bindingActionIcon(kind) {
+        const paths = {
+          current: '<circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/>',
+          bind: '<path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-2 2M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l2-2"/>',
+          subscribed: '<path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/>',
+          unsubscribed: '<path d="m3 3 18 18M9 3a6 6 0 0 1 9 5c0 2 .3 3.5 1 5M6 6c-1 1-1 2-1 4 0 5-2 5-2 7h14M10 21h4"/>',
+        };
+        return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">' + paths[kind] + '</svg>';
+      }
+
       function renderBindingTable(binding) {
         const sessions = state.desktopSessions || [];
         if (!sessions.length) {
@@ -2780,13 +2803,15 @@ function renderHtml(): string {
             const targetKey = 'desktop:' + session.threadId;
             const active = targetKey === binding.currentTargetKey;
             const subscribed = !(binding.notificationExclusions || []).includes(session.threadId);
+            const bindingLabel = active ? '当前绑定会话' : '绑定此会话';
+            const subscriptionLabel = subscribed ? '取消订阅' : '开启订阅';
             return ''
               + '<tr class="' + (active ? 'current' : '') + '">'
               +   '<td><div class="binding-table-title">' + escapeHtml(session.title || 'Untitled Session') + (active ? '<span class="binding-table-mark">当前绑定</span>' : '') + '</div></td>'
               +   '<td><div class="binding-table-thread"><code>' + escapeHtml(session.threadId) + '</code></div></td>'
               +   '<td><div class="binding-table-path">' + escapeHtml(session.cwd || '(no cwd)') + '</div></td>'
-              +   '<td><button type="button" class="binding-target-btn' + (active ? ' current' : '') + '" data-action="switch-binding-target" data-binding-id="' + escapeHtml(binding.id) + '" data-target-key="' + escapeHtml(targetKey) + '"' + (active ? ' disabled' : '') + '>' + (active ? '当前绑定会话' : '绑定此会话') + '</button> '
-              + '<button type="button" class="binding-target-btn" data-action="toggle-binding-subscription" data-binding-id="' + escapeHtml(binding.id) + '" data-channel-id="' + escapeHtml(binding.channelType) + '" data-chat-id="' + escapeHtml(binding.chatId) + '" data-thread-id="' + escapeHtml(session.threadId) + '" data-enabled="' + String(!subscribed) + '">' + (subscribed ? '取消订阅' : '开启订阅') + '</button></td>'
+              +   '<td><div class="binding-actions"><span class="binding-action-tip" title="' + bindingLabel + '"><button type="button" aria-label="' + bindingLabel + '" title="' + bindingLabel + '" class="binding-target-btn' + (active ? ' current' : '') + '" data-action="switch-binding-target" data-binding-id="' + escapeHtml(binding.id) + '" data-target-key="' + escapeHtml(targetKey) + '"' + (active ? ' disabled' : '') + '>' + bindingActionIcon(active ? 'current' : 'bind') + '</button></span>'
+              + '<span class="binding-action-tip" title="' + subscriptionLabel + '"><button type="button" aria-label="' + subscriptionLabel + '" title="' + subscriptionLabel + '" class="binding-target-btn" data-action="toggle-binding-subscription" data-binding-id="' + escapeHtml(binding.id) + '" data-channel-id="' + escapeHtml(binding.channelType) + '" data-chat-id="' + escapeHtml(binding.chatId) + '" data-thread-id="' + escapeHtml(session.threadId) + '" data-enabled="' + String(!subscribed) + '">' + bindingActionIcon(subscribed ? 'subscribed' : 'unsubscribed') + '</button></span></div></td>'
               + '</tr>';
           }).join('')
           +     '</tbody>'
