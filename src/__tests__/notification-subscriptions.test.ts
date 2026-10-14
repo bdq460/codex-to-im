@@ -50,7 +50,11 @@ test('current button is hidden; picker groups context with independent selection
   assert.match(picker.sections[0].text,/当前绑定会话/);assert.deepEqual(picker.sections[0].buttons.map(b=>b.text),['取消订阅']);
   assert.deepEqual(picker.sections[1].buttons.map(b=>b.text),['绑定此会话','取消订阅']);
   const card=JSON.parse(buildActionCard(picker.text,picker.navigationButtons,f.address.chatId,picker.sections));
-  const elements=card.body.elements;assert.match(elements[1].content,/A/);assert.equal(elements[2].columns[0].elements[0].text.content,'取消订阅');
+  const elements=card.body.elements as any[];
+  const row=elements.findIndex((e:any)=>e.tag==='markdown' && /^\*\*项目：/.test(e.content||''));
+  assert.ok(row>0);assert.match(elements[row].content,/A/);
+  assert.equal(elements[row-1].tag,'hr');
+  assert.equal(elements[row+1].columns[0].elements[0].text.content,'取消订阅');
 });
 test('same-session notifications use separate card keys for each receiving chat',()=>{
   assert.notEqual(notificationStreamKey({chatId:'one'},'mirror:session:turn'),notificationStreamKey({chatId:'two'},'mirror:session:turn'));

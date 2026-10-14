@@ -167,8 +167,8 @@ If the same shared thread is also used on desktop, its output is mirrored back t
 /new
 ```
 
-This creates a new thread under the working directory of the current formal session.
-If there is no formal session yet, or the current session is temporary, the command fails.
+On Feishu this first opens a "new session · pick a directory" card listing the current session directory, recent session directories and project directories under the default workspace root; the session is created after a directory is chosen. Other channels keep using the working directory of the current formal session.
+On other channels the command fails if there is no formal session yet, or the current session is temporary.
 
 You can also specify a directory explicitly:
 
@@ -185,7 +185,7 @@ You can also specify a directory explicitly:
 - `/t n 100`: list the latest 100 desktop threads, capped at 200.
 - `/t 1`: switch to desktop thread 1.
 - `/t 0`: switch to the temporary thread for the current chat.
-- `/new`: create a new thread under the current formal session directory.
+- `/new`: Feishu opens a directory picker first and creates the thread in the chosen directory; other channels create it under the current formal session directory.
 - `/new <path or project name>`: create a new thread under the specified directory.
 - `/mode <ask|code|plan>`: change the runtime mode.
 - `/reasoning <low|medium|high|xhigh>`: change the reasoning effort; numeric `1-5` aliases remain compatible, while legacy `max`, `ultra`, `6`, and `7` values safely fall back to `xhigh`.

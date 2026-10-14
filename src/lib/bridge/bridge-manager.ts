@@ -38,6 +38,7 @@ import {
   normalizeReasoningEffort,
   parseDesktopThreadListArgs,
   resolveCommandAlias,
+  resolveMenuCommandAlias,
   toUserVisibleBindingError,
   toUserVisibleCommandError,
 } from './command-helpers.js';
@@ -1021,8 +1022,9 @@ async function handleMessage(
   }
 
   // Check for IM commands (before sanitization — commands are validated individually)
-  if (rawText.startsWith('/') || (adapter.provider === 'feishu' && rawText === '绑定其他会话')) {
-    const commandText = rawText === '绑定其他会话' ? '/threads' : rawText;
+  const menuCommandAlias = adapter.provider === 'feishu' ? resolveMenuCommandAlias(rawText) : undefined;
+  if (rawText.startsWith('/') || menuCommandAlias) {
+    const commandText = menuCommandAlias ?? rawText;
     const parts = commandText.split(/\s+/);
     const rawCommand = parts[0].split('@')[0].toLowerCase();
     const args = parts.slice(1).join(' ').trim();

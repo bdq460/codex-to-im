@@ -4,8 +4,8 @@ import type { InboundMessage } from './types.js';
 import type { BaseChannelAdapter } from './channel-adapter.js';
 import { getBridgeContext } from './context.js';
 import * as router from './channel-router.js';
-import { decodeSessionAction, newSessionCommand, sendSessionPicker } from './session-navigation.js';
-import { getDesktopSessionByThreadIdSafe } from './bridge-session-support.js';
+import { decodeSessionAction, newSessionCommand, sendDirectoryPicker, sendSessionPicker } from './session-navigation.js';
+import { getDesktopSessionByThreadIdSafe, resolveNewWorkingDirectory } from './bridge-session-support.js';
 import { deliverBridgeNotice } from './feedback-delivery.js';
 import { getPendingMessage, claimPendingMessage, finishPendingMessage, releasePendingMessage, sessionForMessage, savePendingMessage } from './session-interaction-store.js';
 
@@ -55,6 +55,11 @@ export async function handleSessionAction(adapter: BaseChannelAdapter, msg: Inbo
     if (!await adapter.updateSessionPicker?.(msg.address, options, msg.callbackMessageId)) await sendSessionPicker(adapter, msg.address, options);
     return;
   }
+  if (action.kind === 'newpick') {
+    const options = { offset: action.offset || 0, pendingId: action.pendingId };
+    if (!await adapter.updateDirPicker?.(msg.address, options, msg.callbackMessageId)) await sendDirectoryPicker(adapter, msg.address, options);
+    return;
+  }
   if (action.kind === 'subscribe') {
     const { store } = getBridgeContext();
     let session = store.getSession(action.threadId) || store.findSessionBySdkSessionId(action.threadId);
@@ -85,15 +90,27 @@ export async function handleSessionAction(adapter: BaseChannelAdapter, msg: Inbo
     await deliverBridgeNotice(adapter, msg.address, '这条会话已删除或不可用，请重新选择。');
     await sendSessionPicker(adapter, msg.address, { recent: true, pendingId: action.pendingId }); return;
   }
+  if (action.kind === 'new' && adapter.provider === 'feishu') {
+    // Feishu asks for the target directory first; other channels keep the implicit workspace default.
+    await sendDirectoryPicker(adapter, msg.address, { pendingId: action.pendingId });
+    return;
+  }
+  if (action.kind === 'newdir' && !resolveNewWorkingDirectory(action.dir).ok) {
+    await deliverBridgeNotice(adapter, msg.address, '目录无效，请重新选择或直接发送 `/new 绝对路径`。');
+    await sendDirectoryPicker(adapter, msg.address, { pendingId: action.pendingId });
+    return;
+  }
   const pending = action.pendingId ? claimPendingMessage(msg.address, action.pendingId) : null;
   if (action.pendingId && !pending) return;
+  const createsNewSession = action.kind === 'new' || action.kind === 'newdir';
   let selected = false;
   try {
     if (action.kind === 'resume') selected = await selectSession(adapter, msg, action.sessionId, deps, true, !!pending);
     else {
-      await deps.command(adapter, { ...msg, messageId: msg.callbackMessageId || msg.messageId }, action.kind === 'new' ? newSessionCommand() : `/thread ${action.threadId}`);
+      const commandText = action.kind === 'newdir' ? `/new ${action.dir}` : action.kind === 'new' ? newSessionCommand() : `/thread ${action.threadId}`;
+      await deps.command(adapter, { ...msg, messageId: msg.callbackMessageId || msg.messageId }, commandText);
       const after = store.getChannelBinding(msg.address.channelType, msg.address.chatId);
-      selected = !!after && (action.kind === 'new' ? after.codepilotSessionId !== current?.codepilotSessionId : (store.getSession(after.codepilotSessionId)?.desktop_thread_id || after.sdkSessionId) === action.threadId);
+      selected = !!after && (createsNewSession ? after.codepilotSessionId !== current?.codepilotSessionId : (store.getSession(after.codepilotSessionId)?.desktop_thread_id || after.sdkSessionId) === action.threadId);
     }
     if (selected && action.kind !== 'resume') await adapter.refreshSessionCards?.(msg.address);
     if (!selected) { if (action.pendingId) releasePendingMessage(msg.address, action.pendingId); return; }

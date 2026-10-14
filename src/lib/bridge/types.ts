@@ -75,6 +75,10 @@ export interface OutboundMessage {
   inlineButtons?: InlineButton[][];
   sections?: Array<{ text: string; buttons: InlineButton[] }>;
   sessionPicker?: { unbound?: boolean; offset?: number; recent?: boolean; pendingId?: string; view?: 'recent' | 'all' | 'subscribed' };
+  /** Directory picker shown before creating a new session. */
+  dirPicker?: { offset?: number; pendingId?: string };
+  /** Optional card decoration (title bar + footer hint) for interactive cards. */
+  cardChrome?: { title?: string; template?: string; note?: string };
   resultSessionId?: string;
   /** If replying to a specific message */
   replyToMessageId?: string;

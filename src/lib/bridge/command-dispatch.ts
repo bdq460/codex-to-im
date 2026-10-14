@@ -1,6 +1,6 @@
 import { initializeChatSubscriptions } from './notification-subscriptions.js';
 import path from 'node:path';
-import { sendSessionPicker } from './session-navigation.js';
+import { sendDirectoryPicker, sendSessionPicker } from './session-navigation.js';
 import { getOrCreateDraftSession } from '../../internal-sessions.js';
 import { isCliOnlyCodexModel, readConfiguredCodexModel } from '../../codex-models.js';
 import {
@@ -200,6 +200,10 @@ export async function handleBridgeCommand(
       if (blocked) {
         response = blocked;
         break;
+      }
+      if (adapter.provider === 'feishu' && !parsedArgs.args.trim()) {
+        await sendDirectoryPicker(adapter, msg.address);
+        return;
       }
       const currentSession = currentBinding
         ? store.getSession(currentBinding.codepilotSessionId)

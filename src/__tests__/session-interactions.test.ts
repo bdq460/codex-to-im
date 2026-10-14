@@ -1,9 +1,12 @@
 import './test-setup.js';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { describe, it } from 'node:test';
 import { JsonFileStore } from '../store.js';
 import { initBridgeContext } from '../lib/bridge/context.js';
-import { encodeSessionAction, selectableSessions, decodeSessionAction } from '../lib/bridge/session-navigation.js';
+import { encodeSessionAction, selectableDirectories, selectableSessions, decodeSessionAction } from '../lib/bridge/session-navigation.js';
 import { handleSessionAction, routeSessionReply, sessionInteractionLockId } from '../lib/bridge/session-interactions.js';
 import { rememberSessionMessage, sessionForMessage, savePendingMessage, getPendingMessage, navigationSecret } from '../lib/bridge/session-interaction-store.js';
 import { _testOnly } from '../lib/bridge/bridge-manager.js';
@@ -46,14 +49,24 @@ describe('message-driven sessions', () => {
     await a.handleIncomingEvent({ sender: { sender_type: 'user', sender_id: { open_id: 'u1' } }, message: { message_id: 'quoted-input', parent_id: 'parent-result', root_id: 'root-result', chat_id: f.address.chatId, chat_type: 'p2p', message_type: 'text', content: JSON.stringify({ text: '继续' }), create_time: String(Date.now()) } });
     assert.equal(received[0].replyToMessageId, 'parent-result'); assert.equal(received[0].rootMessageId, 'root-result');
   });
-  it('new-session selection uses real command and manager replay to invoke model once', async () => {
+  it('new-session selection asks for a directory first, then uses real command and manager replay to invoke model once', async () => {
     const f = setup(); let calls = 0;
-    initBridgeContext({ store: f.store, llm: { streamChat: () => { calls++; return new ReadableStream({ start(c) { c.close(); } }); } }, permissions: { resolvePendingPermission: () => false }, lifecycle: {} });
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'cti-new-session-'));
+    const store = new JsonFileStore(new Map([['bridge_default_workspace_root', workspace]]));
+    initBridgeContext({ store, llm: { streamChat: () => { calls++; return new ReadableStream({ start(c) { c.close(); } }); } }, permissions: { resolvePendingPermission: () => false }, lifecycle: {} });
     const m = f.msg(); await _testOnly.handleMessage(f.adapter, m);
-    const button = f.sent.flatMap(s => s.inlineButtons?.flat() || []).find(b => b.text === '新建会话');
-    const click = { ...f.msg(''), callbackData: button.callbackData };
+    const buttons = (text: string) => f.sent.flatMap(s => [...(s.inlineButtons?.flat() || []), ...(s.sections?.flatMap((x: any) => x.buttons || []) || [])]).find(b => b.text === text);
+    await _testOnly.handleMessage(f.adapter, { ...f.msg(''), callbackData: buttons('新建会话').callbackData });
+    assert.equal(store.getChannelBinding(f.address.channelType, f.address.chatId), null);
+    assert.ok(selectableDirectories(f.address).includes(workspace));
+    const directoryButton = f.sent.at(-1).sections?.[0]?.buttons?.[0];
+    assert.equal(directoryButton?.text, '在此目录新建');
+    const chosenDirectory = (decodeSessionAction(directoryButton.callbackData, f.address) as any)?.dir;
+    assert.ok(chosenDirectory);
+    const click = { ...f.msg(''), callbackData: directoryButton.callbackData };
     await _testOnly.handleMessage(f.adapter, click); await _testOnly.handleMessage(f.adapter, click);
     assert.equal(calls, 1); assert.equal(getPendingMessage(f.address, m.messageId)?.status, 'done');
+    assert.equal(store.getChannelBinding(f.address.channelType, f.address.chatId)?.workingDirectory, chosenDirectory);
   });
 
   it('persists message associations and rejects cross-chat and cross-channel references', () => {
@@ -142,8 +155,15 @@ describe('message-driven sessions', () => {
     initBridgeContext({ store: f.store, llm: { streamChat: () => { calls++; return new ReadableStream(); } }, permissions: { resolvePendingPermission: () => false }, lifecycle: {} });
     await _testOnly.handleMessage(f.adapter, f.msg('绑定其他会话'));
     assert.equal(calls, 0);
-    assert.match(f.sent[0].text, /会话中心/);
+    assert.match(f.sent[0].cardChrome?.title || '', /会话中心/);
     assert.equal(f.sent[0].sessionPicker?.recent, true);
+  });
+  it('Chinese menu aliases resolve to commands without starting a model turn', async () => {
+    const f = setup(); let calls = 0;
+    initBridgeContext({ store: f.store, llm: { streamChat: () => { calls++; return new ReadableStream(); } }, permissions: { resolvePendingPermission: () => false }, lifecycle: {} });
+    await _testOnly.handleMessage(f.adapter, f.msg('使用帮助'));
+    assert.equal(calls, 0);
+    assert.match(String(f.sent[0].text || ''), /命令速览/);
   });
   it('normal fallback responses render both actions and persist their session', async () => {
     const f = setup(); const s = f.store.createSession('A', '', '', '/tmp');

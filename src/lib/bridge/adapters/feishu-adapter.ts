@@ -1,6 +1,6 @@
 import { loadSessionCards, saveSessionCards, type SessionCardReference } from '../session-card-cache.js';
 import { rememberSessionMessage, sessionForMessage } from '../session-interaction-store.js';
-import { buildSessionPicker, selectableSessions, sessionResultButtons } from '../session-navigation.js';
+import { buildDirectoryPicker, buildSessionPicker, selectableDirectories, selectableSessions, sessionResultButtons } from '../session-navigation.js';
 import { buildActionCard } from '../markdown/action-card.js';
 /**
  * Feishu (Lark) Adapter — implements BaseChannelAdapter for Feishu Bot API.
@@ -276,8 +276,9 @@ export class FeishuAdapter extends BaseChannelAdapter {
           await this.withFeishuRequestTimeout(id, 'card.update:session-state', ()=>this.restClient!.cardkit.v1.card.update({path:{card_id:entry.cardId!},data:{card:{type:'card_json',data:json},sequence:entry.sequence!}}));
         } else if (entry.message) {
           const m = entry.message;
-          const picker = m.sessionPicker ? buildSessionPicker(m.address, selectableSessions(), m.sessionPicker) : null;
-          const json = buildActionCard(picker?.text || m.text, picker?.navigationButtons || (m.resultSessionId ? sessionResultButtons(m.address,m.resultSessionId) : m.inlineButtons || []), address.chatId, picker?.sections || m.sections);
+          const rebuilt = m.sessionPicker ? buildSessionPicker(m.address, selectableSessions(), m.sessionPicker)
+            : m.dirPicker ? buildDirectoryPicker(m.address, selectableDirectories(m.address), m.dirPicker) : null;
+          const json = buildActionCard(rebuilt?.text || m.text, rebuilt?.navigationButtons || (m.resultSessionId ? sessionResultButtons(m.address,m.resultSessionId) : m.inlineButtons || []), address.chatId, rebuilt?.sections || m.sections, rebuilt?.card || m.cardChrome);
           await this.withFeishuRequestTimeout(id, 'im.message.patch:session-state', ()=>this.restClient!.im.message.patch({path:{message_id:id},data:{content:json}}));
         }
       } catch(error) { console.warn('[feishu-adapter] Session card refresh failed:', error instanceof Error ? error.message : String(error)); }
@@ -285,20 +286,28 @@ export class FeishuAdapter extends BaseChannelAdapter {
     saveSessionCards(this.channelType,this.sessionCards);
   }
   async updateSessionPicker(address: import('../types.js').ChannelAddress, options: import('../session-navigation.js').PickerOptions, messageId?: string): Promise<boolean> {
-    const previous = this.sessionCardRefreshes.get(address.chatId) || Promise.resolve();
-    const update = previous.catch(()=>{}).then(()=>this.updatePickerCard(address,options,messageId));
-    const completion = update.then(()=>{},()=>{});
-    this.sessionCardRefreshes.set(address.chatId,completion);
-    try { return await update; } finally { if(this.sessionCardRefreshes.get(address.chatId)===completion) this.sessionCardRefreshes.delete(address.chatId); }
+    return this.queuePickerUpdate(address, () => this.updatePickerCard(address, { sessionPicker: options }, messageId));
   }
-  private async updatePickerCard(address: import('../types.js').ChannelAddress, options: import('../session-navigation.js').PickerOptions, messageId?: string): Promise<boolean> {
+  async updateDirPicker(address: import('../types.js').ChannelAddress, options: import('../session-navigation.js').DirPickerOptions, messageId?: string): Promise<boolean> {
+    return this.queuePickerUpdate(address, () => this.updatePickerCard(address, { dirPicker: options }, messageId));
+  }
+  private async queuePickerUpdate(address: import('../types.js').ChannelAddress, update: () => Promise<boolean>): Promise<boolean> {
+    const previous = this.sessionCardRefreshes.get(address.chatId) || Promise.resolve();
+    const next = previous.catch(()=>{}).then(update);
+    const completion = next.then(()=>{},()=>{});
+    this.sessionCardRefreshes.set(address.chatId,completion);
+    try { return await next; } finally { if(this.sessionCardRefreshes.get(address.chatId)===completion) this.sessionCardRefreshes.delete(address.chatId); }
+  }
+  private async updatePickerCard(address: import('../types.js').ChannelAddress, patch: { sessionPicker?: import('../session-navigation.js').PickerOptions; dirPicker?: import('../session-navigation.js').DirPickerOptions }, messageId?: string): Promise<boolean> {
     const entry = messageId && this.sessionCards.get(messageId);
-    if (!entry || entry.chatId !== address.chatId || !entry.message?.sessionPicker || !this.restClient) return false;
-    const picker = buildSessionPicker(address,selectableSessions(),options);
+    if (!entry || entry.chatId !== address.chatId || !(entry.message?.sessionPicker || entry.message?.dirPicker) || !this.restClient) return false;
+    const isDir = !!entry.message!.dirPicker;
+    const picker = isDir ? buildDirectoryPicker(address,selectableDirectories(address),patch.dirPicker || entry.message!.dirPicker!) : buildSessionPicker(address,selectableSessions(),patch.sessionPicker || entry.message!.sessionPicker!);
     try {
-      const result = await this.withFeishuRequestTimeout(messageId!, 'im.message.patch:session-picker',()=>this.restClient!.im.message.patch({path:{message_id:messageId!},data:{content:buildActionCard(picker.text,picker.navigationButtons,address.chatId,picker.sections)}}));
+      const result = await this.withFeishuRequestTimeout(messageId!, 'im.message.patch:session-picker',()=>this.restClient!.im.message.patch({path:{message_id:messageId!},data:{content:buildActionCard(picker.text,picker.navigationButtons,address.chatId,picker.sections,picker.card)}}));
       if (result?.code && result.code !== 0) return false;
-      entry.message = {...entry.message,address,text:picker.text,inlineButtons:picker.navigationButtons,sections:picker.sections,sessionPicker:options};
+      entry.message = {...entry.message,address,text:picker.text,inlineButtons:picker.navigationButtons,sections:picker.sections,cardChrome:picker.card,
+        ...(isDir ? { dirPicker: patch.dirPicker || entry.message!.dirPicker!, sessionPicker: undefined } : { sessionPicker: patch.sessionPicker || entry.message!.sessionPicker!, dirPicker: undefined })};
       saveSessionCards(this.channelType,this.sessionCards);return true;
     } catch { return false; }
   }
@@ -421,6 +430,14 @@ export class FeishuAdapter extends BaseChannelAdapter {
       appId,
       appSecret,
       domain,
+      // A half-open socket can leave the adapter "running" while Feishu reports
+      // "app not online". Force the SDK's normal reconnect path when pongs stop.
+      wsConfig: { pingTimeout: 30 },
+      handshakeTimeoutMs: 15_000,
+      onReady: () => console.log('[feishu-adapter] Inbound WebSocket connected'),
+      onReconnecting: () => console.warn('[feishu-adapter] Inbound WebSocket reconnecting'),
+      onReconnected: () => console.log('[feishu-adapter] Inbound WebSocket reconnected'),
+      onError: (error) => console.error('[feishu-adapter] Inbound WebSocket failed:', error.message),
     });
 
     // Monkey-patch WSClient.handleEventData to support card action events (type: "card").
@@ -445,7 +462,9 @@ export class FeishuAdapter extends BaseChannelAdapter {
       };
     }
 
-    this.wsClient.start({ eventDispatcher: dispatcher });
+    void this.wsClient.start({ eventDispatcher: dispatcher }).catch((error: unknown) => {
+      console.error('[feishu-adapter] Inbound WebSocket start failed:', error instanceof Error ? error.message : String(error));
+    });
 
     console.log('[feishu-adapter] Started (botOpenId:', this.botOpenId || 'unknown', ')');
   }
@@ -1446,9 +1465,9 @@ export class FeishuAdapter extends BaseChannelAdapter {
     try {
       const result = await this.withFeishuRequestTimeout(chatId, 'im.message.create:session-navigation', () => this.restClient!.im.message.create({
         params: { receive_id_type: 'chat_id' },
-        data: { receive_id: chatId, msg_type: 'interactive', content: buildActionCard(text, buttons, chatId, message?.sections) },
+        data: { receive_id: chatId, msg_type: 'interactive', content: buildActionCard(text, buttons, chatId, message?.sections, message?.cardChrome) },
       }));
-      if (result?.data?.message_id) { if (message?.sessionPicker || message?.resultSessionId) this.rememberSessionCard(result.data.message_id, {chatId, message}); return { ok: true, messageId: result.data.message_id }; }
+      if (result?.data?.message_id) { if (message?.sessionPicker || message?.dirPicker || message?.resultSessionId) this.rememberSessionCard(result.data.message_id, {chatId, message}); return { ok: true, messageId: result.data.message_id }; }
       return { ok: false, error: `会话卡片发送失败：${result?.msg || '无消息回执'}` };
     } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) }; }
   }
