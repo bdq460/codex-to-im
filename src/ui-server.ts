@@ -2044,8 +2044,13 @@ function renderHtml(): string {
         border: 1px solid var(--border);
         border-radius: 10px;
         background: #ffffff;
-        overflow: hidden;
+        overflow: visible;
       }
+
+      .binding-table thead th:first-child { border-top-left-radius: 10px; }
+      .binding-table thead th:last-child { border-top-right-radius: 10px; }
+      .binding-table tbody tr:last-child td:first-child { border-bottom-left-radius: 10px; }
+      .binding-table tbody tr:last-child td:last-child { border-bottom-right-radius: 10px; }
 
       .binding-table {
         width: 100%;
@@ -2110,7 +2115,29 @@ function renderHtml(): string {
       }
 
       .binding-actions { display: inline-flex; gap: 6px; }
-      .binding-action-tip { display: inline-flex; }
+      .binding-action-tip { display: inline-flex; position: relative; }
+      .binding-action-tooltip {
+        position: absolute;
+        bottom: calc(100% + 6px);
+        right: 0;
+        z-index: 20;
+        padding: 6px 9px;
+        border-radius: 6px;
+        background: #1f2937;
+        color: #ffffff;
+        font-size: 12px;
+        font-weight: 400;
+        line-height: 18px;
+        white-space: nowrap;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, .16);
+        visibility: hidden;
+        opacity: 0;
+        pointer-events: none;
+      }
+      .binding-action-tip:hover .binding-action-tooltip,
+      .binding-action-tip:focus-within .binding-action-tooltip { visibility: visible; opacity: 1; }
+      .binding-action-tip > button:disabled { pointer-events: none; }
+      .binding-action-tip:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; border-radius: 8px; }
       .binding-target-btn svg { width: 17px; height: 17px; }
       .binding-target-btn:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
       .binding-target-btn.current:disabled { opacity: 1; cursor: default; }
@@ -2122,6 +2149,7 @@ function renderHtml(): string {
       }
 
       @container (max-width: 540px) {
+        .binding-action-tip:first-child .binding-action-tooltip { left: 0; right: auto; }
         .binding-table thead { display: none; }
         .binding-table tbody, .binding-table tr { display: block; }
         .binding-table tr + tr { border-top: 1px solid var(--border); }
@@ -2803,6 +2831,7 @@ function renderHtml(): string {
             const targetKey = 'desktop:' + session.threadId;
             const active = targetKey === binding.currentTargetKey;
             const subscribed = !(binding.notificationExclusions || []).includes(session.threadId);
+            const tooltipId = 'binding-tip-' + binding.id + '-' + session.threadId;
             const bindingLabel = active ? '当前绑定会话' : '绑定此会话';
             const subscriptionLabel = subscribed ? '取消订阅' : '开启订阅';
             return ''
@@ -2810,8 +2839,8 @@ function renderHtml(): string {
               +   '<td><div class="binding-table-title">' + escapeHtml(session.title || 'Untitled Session') + (active ? '<span class="binding-table-mark">当前绑定</span>' : '') + '</div></td>'
               +   '<td><div class="binding-table-thread"><code>' + escapeHtml(session.threadId) + '</code></div></td>'
               +   '<td><div class="binding-table-path">' + escapeHtml(session.cwd || '(no cwd)') + '</div></td>'
-              +   '<td><div class="binding-actions"><span class="binding-action-tip" title="' + bindingLabel + '"><button type="button" aria-label="' + bindingLabel + '" title="' + bindingLabel + '" class="binding-target-btn' + (active ? ' current' : '') + '" data-action="switch-binding-target" data-binding-id="' + escapeHtml(binding.id) + '" data-target-key="' + escapeHtml(targetKey) + '"' + (active ? ' disabled' : '') + '>' + bindingActionIcon(active ? 'current' : 'bind') + '</button></span>'
-              + '<span class="binding-action-tip" title="' + subscriptionLabel + '"><button type="button" aria-label="' + subscriptionLabel + '" title="' + subscriptionLabel + '" class="binding-target-btn" data-action="toggle-binding-subscription" data-binding-id="' + escapeHtml(binding.id) + '" data-channel-id="' + escapeHtml(binding.channelType) + '" data-chat-id="' + escapeHtml(binding.chatId) + '" data-thread-id="' + escapeHtml(session.threadId) + '" data-enabled="' + String(!subscribed) + '">' + bindingActionIcon(subscribed ? 'subscribed' : 'unsubscribed') + '</button></span></div></td>'
+              +   '<td><div class="binding-actions"><span class="binding-action-tip"' + (active ? ' tabindex="0" aria-label="' + bindingLabel + '" aria-describedby="' + escapeHtml(tooltipId) + '-target"' : '') + '><button type="button" aria-label="' + bindingLabel + '" aria-describedby="' + escapeHtml(tooltipId) + '-target" class="binding-target-btn' + (active ? ' current' : '') + '" data-action="switch-binding-target" data-binding-id="' + escapeHtml(binding.id) + '" data-target-key="' + escapeHtml(targetKey) + '"' + (active ? ' disabled' : '') + '>' + bindingActionIcon(active ? 'current' : 'bind') + '</button><span class="binding-action-tooltip" role="tooltip" id="' + escapeHtml(tooltipId) + '-target">' + bindingLabel + '</span></span>'
+              + '<span class="binding-action-tip"><button type="button" aria-label="' + subscriptionLabel + '" aria-describedby="' + escapeHtml(tooltipId) + '-subscription" class="binding-target-btn" data-action="toggle-binding-subscription" data-binding-id="' + escapeHtml(binding.id) + '" data-channel-id="' + escapeHtml(binding.channelType) + '" data-chat-id="' + escapeHtml(binding.chatId) + '" data-thread-id="' + escapeHtml(session.threadId) + '" data-enabled="' + String(!subscribed) + '">' + bindingActionIcon(subscribed ? 'subscribed' : 'unsubscribed') + '</button><span class="binding-action-tooltip" role="tooltip" id="' + escapeHtml(tooltipId) + '-subscription">' + subscriptionLabel + '</span></span></div></td>'
               + '</tr>';
           }).join('')
           +     '</tbody>'
