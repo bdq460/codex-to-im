@@ -1,3 +1,4 @@
+import { initializeChatSubscriptions } from './notification-subscriptions.js';
 import path from 'node:path';
 import { sendSessionPicker } from './session-navigation.js';
 import { getOrCreateDraftSession } from '../../internal-sessions.js';
@@ -834,6 +835,7 @@ export async function handleBridgeCommand(
         response = blocked;
         break;
       }
+      initializeChatSubscriptions(store, msg.address);
       store.deleteChannelBinding(currentBinding.id);
       auditCommandBindingChange(
         'unbind',
@@ -848,7 +850,7 @@ export async function handleBridgeCommand(
           ['聊天', formatBindingChatLabel(currentBinding)],
         ],
         [
-          '这个聊天已释放当前会话绑定。',
+          '这个聊天已释放当前发送会话绑定；通知订阅保留，可在会话中心或工作台取消。',
           adapter.provider === 'feishu' ? '之后发送文本会先提示选择会话；发送 /t 可查看最近会话和新建入口。' : '之后如果直接发送文本，会自动进入新的临时草稿线程。',
         ],
         responseParseMode === 'Markdown',

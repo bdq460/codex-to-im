@@ -8,7 +8,7 @@ import { CTI_HOME } from '../config.js';
 import { JsonFileStore } from '../store.js';
 import { initBridgeContext } from '../lib/bridge/context.js';
 import { initializeChatSubscriptions, listChatSubscriptions, notificationBindings, setNotificationSubscription, checkpointNotification } from '../lib/bridge/notification-subscriptions.js';
-import { bindStoreToSession } from '../session-bindings.js';
+import { bindStoreToSession, removeBinding } from '../session-bindings.js';
 import { buildSessionPicker, sessionResultButtons } from '../lib/bridge/session-navigation.js';
 import { buildActionCard } from '../lib/bridge/markdown/action-card.js';
 import { notificationStreamKey } from '../lib/bridge/mirror-feedback-controller.js';
@@ -87,4 +87,11 @@ test('workbench reads without changing subscription state and edits receive sett
   assert.ok(listChatSubscriptions(f.store,f.address).some(s=>s.sessionId===f.b.id));
   assert.throws(()=>updateNotificationPanel(f.store,f.address.channelType,'unknown-chat',f.b.id,true),/尚未建立/);
   updateNotificationPanel(f.store,f.address.channelType,f.address.chatId,f.b.id,false);assert.ok(!listChatSubscriptions(f.store,f.address).some(s=>s.sessionId===f.b.id));
+});
+
+test('unbinding the initial legacy sending session freezes receive settings instead of removing notifications',()=>{
+  const f=fixture();const binding=f.store.getChannelBinding(f.address.channelType,f.address.chatId)!;
+  removeBinding(f.store,binding.id);
+  assert.equal(f.store.getChannelBinding(f.address.channelType,f.address.chatId),null);
+  assert.deepEqual(listChatSubscriptions(f.store,f.address).map(s=>s.sessionId),[f.a.id]);
 });

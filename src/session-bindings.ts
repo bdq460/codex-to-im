@@ -343,6 +343,7 @@ export function removeBinding(
     throw new Error('Binding not found.');
   }
   const fromBinding = { ...binding };
+  initializeChatSubscriptions(store, {channelType:binding.channelType,chatId:binding.chatId});
   store.deleteChannelBinding(bindingId);
   recordBindingChange(store, {
     action: 'web_unbind',
