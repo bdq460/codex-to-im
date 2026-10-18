@@ -90,6 +90,74 @@ describe('withFileLock', () => {
     }
   });
 
+  it('releases the lock when an external tool rewrites it with identical content (copy-back)', () => {
+    const target = tempTarget();
+    const lockPath = `${target}.lock`;
+    try {
+      const result = withFileLock(target, () => {
+        // Simulate a safe-delete guard / backup agent replacing the file
+        // via copy-back: new inode, byte-identical content (same token).
+        const content = fs.readFileSync(lockPath, 'utf8');
+        fs.rmSync(lockPath);
+        fs.writeFileSync(lockPath, content);
+        return 'ok';
+      });
+      assert.equal(result, 'ok');
+      assert.equal(fs.existsSync(lockPath), false);
+    } finally {
+      fs.rmSync(path.dirname(target), { recursive: true, force: true });
+    }
+  });
+
+  it('survives mixed nested locking and error paths without leaking lock files', () => {
+    const base = fs.mkdtempSync(path.join(os.tmpdir(), 'cti-lock-mix-'));
+    const a = path.join(base, 'a.json');
+    const b = path.join(base, 'b.json');
+    try {
+      for (let i = 0; i < 300; i += 1) {
+        try {
+          withFileLock(a, () => {
+            withFileLock(b, () => {
+              if (i % 3 === 0) throw new Error('inner boom');
+              return i;
+            });
+            if (i % 5 === 0) throw new Error('outer boom');
+            return i;
+          });
+        } catch { /* expected */ }
+        try { withFileLock(b, () => withFileLock(a, () => i)); } catch { /* cross order */ }
+      }
+      assert.equal(fs.existsSync(`${a}.lock`), false);
+      assert.equal(fs.existsSync(`${b}.lock`), false);
+    } finally {
+      fs.rmSync(base, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps working when an injected shim blocks unlink with a confirmation error', () => {
+    const target = tempTarget();
+    const lockPath = `${target}.lock`;
+    // Own leaked ghost lock, as seen in production after a blocked release.
+    fs.writeFileSync(lockPath, JSON.stringify({ token: 'ghost', pid: process.pid, createdAt: Date.now() }), 'utf8');
+    const unlinkSync = fs.unlinkSync;
+    try {
+      // Simulate CodeBuddy's node-language-shim safe-delete guard rejecting
+      // every unlink of the lock path with an interactive-confirmation error.
+      fs.unlinkSync = ((p: Parameters<typeof fs.unlinkSync>[0], ...rest: unknown[]) => {
+        if (typeof p === 'string' && p === lockPath) {
+          throw new Error('[safe-delete][SAFE_DELETE_BULK_CONFIRM_REQUIRED] simulated');
+        }
+        return (unlinkSync as (...args: unknown[]) => void)(p, ...rest);
+      }) as typeof fs.unlinkSync;
+      const result = withFileLock(target, () => 'recovered', { timeoutMs: 500 });
+      assert.equal(result, 'recovered');
+      assert.equal(fs.existsSync(lockPath), false);
+    } finally {
+      fs.unlinkSync = unlinkSync;
+    }
+    fs.rmSync(path.dirname(target), { recursive: true, force: true });
+  });
+
   it('still respects locks owned by another live process regardless of age', () => {
     const target = tempTarget();
     const ghostPath = `${target}.lock`;

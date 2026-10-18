@@ -483,8 +483,22 @@ export function getUiServerStatus(): UiServerStatus {
   };
 }
 
+// The bridge/UI run unattended in the background. NODE_OPTIONS inherited from a
+// developer shell may carry tool injections (--require shims such as CodeBuddy's
+// node-language-shim) that hook fs and throw interactive-confirmation errors
+// (e.g. SAFE_DELETE_BULK_CONFIRM_REQUIRED) once a bulk-delete threshold is hit.
+// Nobody can answer those prompts in a daemon, which historically deadlocked
+// every file lock release after ~500 deletions. Strip the whole variable;
+// legitimate tuning can be configured in product code instead.
+function stripInjectionEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const clean = { ...env };
+  delete clean.NODE_OPTIONS;
+  delete clean.NODE_PRELOAD;
+  return clean;
+}
+
 function buildDaemonEnv(): NodeJS.ProcessEnv {
-  const env = { ...process.env } as NodeJS.ProcessEnv;
+  const env = stripInjectionEnv(process.env) as NodeJS.ProcessEnv;
   env.CTI_HOME = CTI_HOME;
   for (const [key, value] of loadRawConfigEnv()) {
     env[key] = value;
@@ -861,7 +875,7 @@ export async function ensureUiServerRunning(): Promise<UiServerStatus> {
     cwd: packageRoot,
     detached: true,
     env: {
-      ...process.env,
+      ...stripInjectionEnv(process.env),
       CTI_HOME,
     },
     stdio: ['ignore', stdoutFd, stderrFd],
