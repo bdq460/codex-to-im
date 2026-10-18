@@ -47,11 +47,11 @@ test('current button is hidden; picker groups context with independent selection
   const f=fixture();assert.deepEqual(sessionResultButtons(f.address,f.a.id).flat().map(b=>b.text),['取消订阅']);
   assert.ok(sessionResultButtons(f.address,f.b.id).flat().some(b=>b.text==='绑定此会话'));
   const picker=buildSessionPicker(f.address,[{threadId:f.a.id,sessionId:f.a.id,title:'A',cwd:'/tmp/a'},{threadId:f.b.id,sessionId:f.b.id,title:'B',cwd:'/tmp/b'}],{view:'all'});
-  assert.match(picker.sections[0].text,/当前绑定会话/);assert.deepEqual(picker.sections[0].buttons.map(b=>b.text),['取消订阅']);
+  assert.match(picker.sections[0].text,/✅ 当前绑定/);assert.deepEqual(picker.sections[0].buttons.map(b=>b.text),['取消订阅']);
   assert.deepEqual(picker.sections[1].buttons.map(b=>b.text),['绑定此会话','取消订阅']);
   const card=JSON.parse(buildActionCard(picker.text,picker.navigationButtons,f.address.chatId,picker.sections));
   const elements=card.body.elements as any[];
-  const row=elements.findIndex((e:any)=>e.tag==='markdown' && /^\*\*项目：/.test(e.content||''));
+  const row=elements.findIndex((e:any)=>e.tag==='markdown' && /^\*\*📁 项目：/.test(e.content||''));
   assert.ok(row>0);assert.match(elements[row].content,/A/);
   assert.equal(elements[row-1].tag,'hr');
   assert.equal(elements[row+1].columns[0].elements[0].text.content,'取消订阅');

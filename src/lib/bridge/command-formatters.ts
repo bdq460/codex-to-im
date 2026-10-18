@@ -3,6 +3,7 @@ import path from 'node:path';
 import type { BridgeSession } from './host.js';
 import type { ChannelBinding } from './types.js';
 import type { DesktopSessionSummary } from '../../desktop-sessions.js';
+import { isEnvironmentalUserInjection } from '../../desktop-sessions.js';
 import {
   DEFAULT_DESKTOP_THREAD_LIST_LIMIT,
   MAX_DESKTOP_THREAD_LIST_LIMIT,
@@ -64,6 +65,70 @@ export function getSessionDisplayName(session: BridgeSession | null | undefined,
   return '未命名会话';
 }
 
+/**
+ * Full prompt + response of the latest turn so users can confirm they picked
+ * the session they expected when switching bindings. Content is kept complete,
+ * clipped only by a generous guard so the notice can still be delivered.
+ */
+const LAST_EXCHANGE_MAX_CHARS = 2000;
+
+function clipExchangeContent(content: string): string {
+  const text = formatStoredMessageContent(content).trim();
+  if (!text) return '(空)';
+  return text.length <= LAST_EXCHANGE_MAX_CHARS
+    ? text
+    : `${text.slice(0, LAST_EXCHANGE_MAX_CHARS)}…(内容过长已截断)`;
+}
+
+function exchangeTurns(messages: Array<{ role: string; content: string }>) {
+  return messages.filter(m => (m.role === 'user' || m.role === 'assistant')
+    && String(m.content ?? '').trim()
+    && !(m.role === 'user' && isEnvironmentalUserInjection(String(m.content ?? ''))));
+}
+
+export function summarizeLastExchange(messages: Array<{ role: string; content: string }>): string {
+  const turns = exchangeTurns(messages);
+  if (turns.length === 0) return '暂无记录';
+  const lastIdx = turns.length - 1;
+  const lines: string[] = [];
+  if (turns[lastIdx].role === 'assistant') {
+    for (let i = lastIdx - 1; i >= 0; i--) {
+      if (turns[i].role === 'user') {
+        lines.push(`**User**：${clipExchangeContent(String(turns[i].content))}`);
+        break;
+      }
+    }
+    lines.push(`**Codex**：${clipExchangeContent(String(turns[lastIdx].content))}`);
+  } else {
+    lines.push(`**User**：${clipExchangeContent(String(turns[lastIdx].content))}`);
+    lines.push('**Codex**：(尚无回复)');
+  }
+  return lines.join('\n\n');
+}
+
+/** Compact multi-turn view of what the Codex chat window shows: the most recent user/assistant exchanges. */
+export function summarizeRecentExchanges(messages: Array<{ role: string; content: string }>, turnLimit = 3): string {
+  const turns = exchangeTurns(messages);
+  if (turns.length === 0) return '暂无记录';
+  const exchanges: Array<{ user?: string; assistant?: string }> = [];
+  for (const turn of turns) {
+    const last = exchanges[exchanges.length - 1];
+    if (turn.role === 'user') {
+      exchanges.push({ user: String(turn.content) });
+    } else if (last && last.assistant === undefined && last.user !== undefined) {
+      last.assistant = String(turn.content);
+    } else {
+      exchanges.push({ assistant: String(turn.content) });
+    }
+  }
+  const recent = exchanges.slice(-turnLimit);
+  return recent.map((exchange, index) => {
+    const lines = [`**${index + 1}. User**：${clipExchangeContent(exchange.user || '(无输入)')}`];
+    lines.push(`   **Codex**：${clipExchangeContent(exchange.assistant || '(尚无回复)')}`);
+    return lines.join('\n');
+  }).join('\n\n');
+}
+
 export function buildCommandFields(
   title: string,
   fields: Array<[string, string | null | undefined]>,
@@ -74,12 +139,14 @@ export function buildCommandFields(
   const normalizedNotes = notes.filter((note) => note.trim().length > 0);
 
   if (markdown) {
-    const lines = [`**${title}**`, ''];
-    for (const [label, value] of normalizedFields) {
-      lines.push(`- **${label}**：${value}`);
+    const lines = [`**🔹 ${title}**`, ''];
+    if (normalizedFields.length > 0) {
+      for (const [label, value] of normalizedFields) {
+        lines.push(`- **${label}**：${value}`);
+      }
     }
     if (normalizedNotes.length > 0) {
-      lines.push('', '**说明**');
+      lines.push('', '**💡 说明**');
       for (const note of normalizedNotes) {
         lines.push(`- ${note}`);
       }
@@ -88,10 +155,10 @@ export function buildCommandFields(
   }
 
   return [
-    title,
+    `【${title}】`,
     '',
     ...normalizedFields.map(([label, value]) => `${label}: ${value}`),
-    ...(normalizedNotes.length > 0 ? ['', ...normalizedNotes] : []),
+    ...(normalizedNotes.length > 0 ? ['', '—— 说明 ——', ...normalizedNotes.map(note => `- ${note}`)] : []),
   ].join('\n').trim();
 }
 
@@ -102,30 +169,67 @@ export function buildIndexedCommandList(
   markdown = false,
 ): string {
   if (markdown) {
-    const lines = [`**${title}**`, ''];
+    const lines = [`**🔹 ${title}**`, ''];
     items.forEach((item, index) => {
-      const marker = `${index + 1}.`;
-      const childIndent = ' '.repeat(marker.length + 1);
-      lines.push(`${marker} **${item.heading}**`);
-      item.details.filter(Boolean).forEach((detail) => lines.push(`${childIndent}- ${detail}`));
+      lines.push(`**${index + 1}. ${item.heading}**`);
+      item.details.filter(Boolean).forEach((detail) => lines.push(`- ${detail}`));
       lines.push('');
     });
-    footer.filter(Boolean).forEach((line) => lines.push(`- ${line}`));
+    if (footer.filter(Boolean).length > 0) {
+      lines.push('**💡 说明**');
+      footer.filter(Boolean).forEach((line) => lines.push(`- ${line}`));
+    }
     return lines.join('\n').trim();
   }
 
-  const lines = [title, ''];
+  const lines = [`【${title}】`, ''];
   items.forEach((item, index) => {
     lines.push(`${index + 1}. ${item.heading}`);
-    item.details.filter(Boolean).forEach((detail) => lines.push(`   ${detail}`));
+    item.details.filter(Boolean).forEach((detail) => lines.push(`   - ${detail}`));
     lines.push('');
   });
-  footer.filter(Boolean).forEach((line) => lines.push(line));
+  if (footer.filter(Boolean).length > 0) {
+    lines.push('—— 说明 ——');
+    footer.filter(Boolean).forEach((line) => lines.push(line));
+  }
   return lines.join('\n').trim();
 }
 
 export function formatCommandPath(cwd: string | undefined | null): string {
   return cwd?.trim() || '~';
+}
+
+/**
+ * Structured "switched to desktop session" notice: header / metadata / latest
+ * exchange / next-step hint as separate visual layers (plain channels get the
+ * markdown syntax stripped).
+ */
+export function buildDesktopSwitchNotice(title: string, workDir: string, lastExchange: string, markdown: boolean): string {
+  if (!markdown) {
+    return [
+      '【已切换到桌面会话】',
+      '',
+      `标题: ${title}`,
+      `目录: ${formatCommandPath(workDir)}`,
+      '',
+      '—— 最近交互 ——',
+      lastExchange.replace(/\*\*/g, ''),
+      '',
+      '接下来直接发送文本即可继续。',
+    ].join('\n');
+  }
+  return [
+    '**🔄 已切换到桌面会话**',
+    '',
+    `- **标题**：${title}`,
+    `- **目录**：${formatCommandPath(workDir)}`,
+    '',
+    '**🗂 最近交互**',
+    '',
+    lastExchange,
+    '',
+    '💬 接下来直接发送文本即可继续。',
+  ].join('\n');
 }
 
 export function buildDesktopThreadsCommandResponse(

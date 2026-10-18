@@ -40,8 +40,7 @@ export function rememberSessionMessage(address: Pick<ChannelAddress, 'channelTyp
 export function sessionForMessage(address: ChannelAddress, messageId: string): string | null {
   return read().refs[scope(address, messageId)] || null;
 }
-export function savePendingMessage(message: InboundMessage): string {
-  const id = message.messageId;
+export function savePendingMessage(message: InboundMessage, id = message.messageId): string {
   mutate(data => {
     const k = scope(message.address, id);
     if (!data.pending[k]) data.pending[k] = {

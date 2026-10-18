@@ -12,11 +12,27 @@ import * as router from '../lib/bridge/channel-router.js';
 import {
   buildConversationPromptText,
   buildLocalAttachmentPromptSupplement,
+  isSessionBusyErrorMessage,
   processMessage,
   validateInboundAttachmentSizes,
 } from '../lib/bridge/conversation-engine.js';
 
 const DATA_DIR = path.join(CTI_HOME, 'data');
+
+describe('isSessionBusyErrorMessage', () => {
+  it('recognizes store-level busy and codex thread writer conflicts', () => {
+    assert.equal(isSessionBusyErrorMessage('Session is busy processing another request'), true);
+    assert.equal(isSessionBusyErrorMessage(
+      'Error: thread/resume: thread/resume failed: thread 01a13994 already has an active writer (code -32600)',
+    ), true);
+    assert.equal(isSessionBusyErrorMessage(
+      'thread-store conflict: thread x already has an active writer',
+    ), true);
+    assert.equal(isSessionBusyErrorMessage('some unrelated failure'), false);
+    assert.equal(isSessionBusyErrorMessage(''), false);
+    assert.equal(isSessionBusyErrorMessage(null), false);
+  });
+});
 
 describe('conversation attachment validation', () => {
   it('enforces decoded per-file and aggregate limits', () => {
@@ -154,6 +170,83 @@ describe('processMessage desktop busy retry', () => {
         delete process.env.CTI_DESKTOP_BUSY_RETRY_DELAYS_MS;
       } else {
         process.env.CTI_DESKTOP_BUSY_RETRY_DELAYS_MS = oldRetryDelays;
+      }
+    }
+  });
+
+  it('fails fast with an actionable hint when the thread writer lock stays held', async () => {
+    const oldRetryDelays = process.env.CTI_DESKTOP_BUSY_RETRY_DELAYS_MS;
+    const oldLockDelays = process.env.CTI_WRITER_LOCK_RETRY_DELAYS_MS;
+    process.env.CTI_DESKTOP_BUSY_RETRY_DELAYS_MS = '0,0';
+    process.env.CTI_WRITER_LOCK_RETRY_DELAYS_MS = '0,0';
+    fs.rmSync(DATA_DIR, { recursive: true, force: true });
+
+    try {
+      let streamCalls = 0;
+      const store = new JsonFileStore(makeSettings());
+      initBridgeContext({
+        store,
+        llm: {
+          streamChat() {
+            streamCalls += 1;
+            return streamFromSseEvents([
+              sseEvent('error', 'Error: thread/resume: thread/resume failed: thread 01a1431c already has an active writer (code -32600)'),
+            ]);
+          },
+        },
+        permissions: {
+          resolvePendingPermission: () => false,
+        },
+        lifecycle: {},
+      });
+
+      const address = {
+        channelType: 'feishu-default',
+        channelProvider: 'feishu',
+        chatId: 'chat-writer-lock',
+        userId: 'user-writer-lock',
+      } as const;
+      const initialBinding = router.createBinding(address, 'D:\\workspace\\writer-lock');
+      store.updateSession(initialBinding.codepilotSessionId, {
+        sdk_session_id: 'desktop-thread-lock',
+        codex_thread_id: 'desktop-thread-lock',
+        desktop_thread_id: 'desktop-thread-lock',
+        thread_origin: 'desktop',
+      });
+      router.updateBinding(initialBinding.id, { sdkSessionId: 'desktop-thread-lock' });
+      const binding = router.resolve(address);
+      const statusNotes: string[] = [];
+
+      const result = await processMessage(
+        binding,
+        'hello locked thread',
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        (note) => {
+          if (note) statusNotes.push(note);
+        },
+      );
+
+      assert.equal(streamCalls, 3);
+      assert.equal(result.hasError, true);
+      assert.equal(result.errorCode, 'desktop_writer_locked');
+      assert.match(result.errorMessage || '', /该会话正在 Codex Desktop 中使用/);
+      assert.doesNotMatch(result.errorMessage || '', /thread-store conflict|原始错误/);
+      assert.match(statusNotes[0] || '', /写入锁被其它进程占用.*重试（1\/2）/);
+    } finally {
+      if (oldRetryDelays === undefined) {
+        delete process.env.CTI_DESKTOP_BUSY_RETRY_DELAYS_MS;
+      } else {
+        process.env.CTI_DESKTOP_BUSY_RETRY_DELAYS_MS = oldRetryDelays;
+      }
+      if (oldLockDelays === undefined) {
+        delete process.env.CTI_WRITER_LOCK_RETRY_DELAYS_MS;
+      } else {
+        process.env.CTI_WRITER_LOCK_RETRY_DELAYS_MS = oldLockDelays;
       }
     }
   });

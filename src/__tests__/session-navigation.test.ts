@@ -30,15 +30,16 @@ describe('session navigation', () => {
     assert.equal(decodeSessionAction(token, address, 2_000_000), null);
     assert.equal(decodeSessionAction(token.replace('session:', 'session:x'), address, 101), null);
   });
-  it('offers three recent sessions, new and full list without executing the input', () => {
-    const sessions = Array.from({ length: 9 }, (_, i) => ({ threadId: id, title: `会话${i}`, cwd: '/projects/app' }));
+  it('offers ten sessions per page with detail buttons without executing the input', () => {
+    const sessions = Array.from({ length: 12 }, (_, i) => ({ threadId: id, title: `会话${i}`, cwd: '/projects/app' }));
     const picker = buildSessionPicker(address, sessions, { unbound: true, recent: true, pendingId: 'queued-message' });
     assert.match(picker.text, /当前绑定会话：未选择/);
     assert.match(picker.text, /原消息已保留/);
-    assert.equal(picker.inlineButtons.flat().filter(b => b.text === '在此会话继续原消息').length, 3);
+    assert.equal(picker.inlineButtons.flat().filter(b => b.text === '在此会话继续原消息').length, 10);
+    assert.equal(picker.inlineButtons.flat().filter(b => b.text === '会话详情').length, 10);
     assert.ok(picker.inlineButtons.flat().some(b => b.text === '全部会话'));
-    const next = buildSessionPicker(address, sessions, { offset: 6 });
-    assert.equal(next.inlineButtons.flat().filter(b => b.text === '绑定此会话').length, 3);
+    const next = buildSessionPicker(address, sessions, { offset: 10 });
+    assert.equal(next.inlineButtons.flat().filter(b => b.text === '绑定此会话').length, 2);
     assert.ok(next.inlineButtons.flat().some(b => b.text === '上一页'));
     assert.ok(!next.inlineButtons.flat().some(b => b.text === '下一页'));
     const card = JSON.parse(buildActionCard(picker.text, picker.inlineButtons, address.chatId));

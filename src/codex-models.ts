@@ -77,6 +77,14 @@ export const KNOWN_CODEX_MODEL_FALLBACKS: CachedCodexModel[] = [
     defaultReasoningLevel: 'medium',
     supportedReasoningLevels: buildReasoningLevels(['low', 'medium', 'high', 'xhigh', 'max']),
   },
+  {
+    slug: 'gpt-5.3-codex-spark',
+    displayName: 'GPT-5.3-Codex-Spark',
+    visibility: 'list',
+    supportedInApi: false,
+    defaultReasoningLevel: 'medium',
+    supportedReasoningLevels: buildReasoningLevels(['low', 'medium', 'high']),
+  },
 ];
 
 export function readConfiguredCodexModel(configPath = DEFAULT_CODEX_CONFIG_PATH): string | null {

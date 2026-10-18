@@ -9,3 +9,19 @@ config.env
 .local-runtime/
 docs/local-changes/
 .DS_Store
+
+# AI assistant local data
+.codebuddy/
+
+# Editors
+.idea/
+.vscode/
+.history/
+
+# Test and build artifacts
+coverage/
+*.tsbuildinfo
+
+# npm debug logs and Windows junk
+npm-debug.log*
+Thumbs.db

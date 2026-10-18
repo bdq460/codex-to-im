@@ -1763,6 +1763,22 @@ function mapDesktopEventsToMessages(events: DesktopSessionEvent[]): BridgeMessag
   }));
 }
 
+const ENVIRONMENTAL_USER_INJECTION_PREFIXES = [
+  '# AGENTS.md instructions for',
+];
+
+/**
+ * Codex injects project instructions (AGENTS.md) into the thread as user-role
+ * messages. They are environment context, not conversation, and must never be
+ * mirrored to IM or shown in history/latest-exchange summaries.
+ */
+export function isEnvironmentalUserInjection(content: string | null | undefined): boolean {
+  const firstLine = (content || '').split(/\r?\n/).find((line) => line.trim().length > 0);
+  if (!firstLine) return false;
+  const trimmed = firstLine.trim();
+  return ENVIRONMENTAL_USER_INJECTION_PREFIXES.some((prefix) => trimmed.startsWith(prefix));
+}
+
 function readUtf8FileTail(filePath: string, maxBytes: number): { content: string; reachedStart: boolean } {
   const stat = fs.statSync(filePath);
   const bytesToRead = Math.min(stat.size, Math.max(1, maxBytes));
@@ -1817,7 +1833,9 @@ export function readDesktopSessionMessagesByFilePath(filePath: string, limit = 8
     return [];
   }
 
-  return mapDesktopEventsToMessages(events).slice(-safeLimit);
+  return mapDesktopEventsToMessages(
+    events.filter((event) => !(event.role === 'user' && isEnvironmentalUserInjection(event.content))),
+  ).slice(-safeLimit);
 }
 
 export function readDesktopSessionMessages(threadId: string, limit = 8): BridgeMessage[] {

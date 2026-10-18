@@ -22,6 +22,7 @@ import {
 import { getBridgeContext } from './context.js';
 import type { BridgeSession } from './host.js';
 import { validateWorkingDirectory } from './security/validators.js';
+import { getExplicitDesktopThreadId } from './turns/turn-classifier.js';
 
 const AVAILABLE_CODEX_MODELS = listAvailableCodexModels();
 const AVAILABLE_CODEX_MODEL_MAP = new Map(AVAILABLE_CODEX_MODELS.map((model) => [model.slug, model]));
@@ -198,4 +199,18 @@ export function getHistoryMessageLimit(): number {
 export function getDesktopThreadTitle(threadId: string | undefined | null): string | null {
   if (!threadId) return null;
   return getDesktopSessionByThreadIdSafe(threadId, 'status lookup')?.title || null;
+}
+
+/**
+ * Display name shared by the session center, result cards, and switch notices:
+ * desktop-backed sessions use the Codex Desktop thread title; others fall back
+ * to the stored session name.
+ */
+export function resolveSessionDisplayName(session: BridgeSession | null | undefined): string {
+  const desktopThreadId = session ? getExplicitDesktopThreadId(session) : undefined;
+  if (desktopThreadId) {
+    const title = getDesktopThreadTitle(desktopThreadId);
+    if (title?.trim()) return title.trim();
+  }
+  return session?.name?.trim() || '未命名会话';
 }

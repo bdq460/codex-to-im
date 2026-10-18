@@ -5,7 +5,7 @@ import type { BaseChannelAdapter } from './channel-adapter.js';
 import type { ChannelAddress, InlineButton } from './types.js';
 import type { CardChrome } from './markdown/action-card.js';
 import { deliver } from './delivery-layer.js';
-import { getDisplayedDesktopThreads, getWorkspaceRoot } from './bridge-session-support.js';
+import { getDisplayedDesktopThreads, getWorkspaceRoot, resolveSessionDisplayName } from './bridge-session-support.js';
 import { validateWorkingDirectory } from './security/validators.js';
 
 import { navigationSecret } from './session-interaction-store.js';
@@ -13,7 +13,7 @@ import { listChatSubscriptions, isNotificationSubscribed } from './notification-
 import { getBridgeContext } from './context.js';
 const key = navigationSecret();
 const TTL = 30 * 60_000;
-const PAGE_SIZE = 6;
+const PAGE_SIZE = 10;
 const DIR_PAGE_SIZE = 6;
 const DIR_SCAN_LIMIT = 30;
 const DIR_LIST_LIMIT = 60;
@@ -22,7 +22,7 @@ const DIR_SCAN_EXCLUDES = new Set(['node_modules', '__pycache__', '.git', 'dist'
 export type PickerView = 'recent' | 'all' | 'subscribed';
 export type PickerOptions = { unbound?: boolean; offset?: number; recent?: boolean; pendingId?: string; view?: PickerView };
 export type DirPickerOptions = { offset?: number; pendingId?: string };
-export type SessionAction = ({ kind: 'enter'; threadId: string } | { kind: 'resume'; sessionId: string } | { kind: 'list'; offset: number; view?: PickerView } | { kind: 'subscribe'; threadId: string; enabled: boolean; offset?: number; view?: PickerView } | { kind: 'new' } | { kind: 'newpick'; offset?: number } | { kind: 'newdir'; dir: string }) & { pendingId?: string };
+export type SessionAction = ({ kind: 'enter'; threadId: string } | { kind: 'resume'; sessionId: string } | { kind: 'list'; offset: number; view?: PickerView } | { kind: 'subscribe'; threadId: string; enabled: boolean; offset?: number; view?: PickerView } | { kind: 'detail'; threadId: string } | { kind: 'new' } | { kind: 'newpick'; offset?: number } | { kind: 'newdir'; dir: string }) & { pendingId?: string };
 
 export function encodeSessionAction(address: ChannelAddress, action: SessionAction, now = Date.now()): string {
   const payload = Buffer.from(JSON.stringify({ channel: address.channelType, chat: address.chatId, action, expires: now + (action.pendingId ? 24 * 60 * 60_000 : (action.kind === 'resume' || action.kind === 'subscribe') ? 90 * 24 * 60 * 60_000 : TTL) })).toString('base64url');
@@ -47,6 +47,7 @@ export function decodeSessionAction(data: string, address: ChannelAddress, now =
     if (a?.pendingId !== undefined && (typeof a.pendingId !== 'string' || a.pendingId.length > 256)) return null;
     if (a?.kind === 'resume' && typeof a.sessionId === 'string' && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(a.sessionId)) return a;
     if (a?.kind === 'enter' && typeof a.threadId === 'string' && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(a.threadId)) return a;
+    if (a?.kind === 'detail' && typeof a.threadId === 'string' && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(a.threadId)) return a;
     if (a?.kind === 'list' && Number.isInteger(a.offset) && a.offset >= 0 && a.offset < 200) return a;
     if (a?.kind === 'newpick' && (a.offset === undefined || (Number.isInteger(a.offset) && a.offset >= 0 && a.offset < 200))) return a;
     if (a?.kind === 'newdir' && typeof a.dir === 'string' && a.dir.length > 0 && a.dir.length <= 512 && path.isAbsolute(a.dir) && !!validateWorkingDirectory(a.dir)) return a;
@@ -62,10 +63,10 @@ export function buildSessionPicker(address: ChannelAddress, sessions: Array<{ th
   const subscribedIds = new Set(subscriptions.map(r => r.sessionId));
   const view = options.view || (options.recent ? 'recent' : 'all');
   const filtered = view === 'subscribed' ? sessions.filter(s => isNotificationSubscribed(store,address,s.threadId)) : sessions;
-  const size = view === 'recent' ? 3 : PAGE_SIZE;
+  const size = PAGE_SIZE;
   const offset = Math.min(options.offset || 0, Math.max(0, Math.floor((filtered.length - 1) / size) * size));
   const rows = filtered.slice(offset, offset + size);
-  const text = `当前绑定会话：${current?.name || '未选择'}\n通知：默认接收全部未归档会话，可逐条取消 · 切换绑定不会改变订阅\n` + (options.pendingId ? '原消息已保留：选择发送会话后自动继续。' : '设为当前仅决定下一条普通消息发给谁；订阅通知仅决定接收谁的结果。');
+  const text = `当前绑定会话：${current ? resolveSessionDisplayName(current) : '未选择'}\n通知：默认接收全部未归档会话，可逐条取消 · 切换绑定不会改变订阅\n` + (options.pendingId ? '原消息已保留：选择发送会话后自动继续。' : '设为当前仅决定下一条普通消息发给谁；订阅通知仅决定接收谁的结果。');
   const sections = rows.map(s => {
     const id = s.sessionId || store.findSessionBySdkSessionId(s.threadId)?.id || s.threadId;
     const isCurrent = binding?.codepilotSessionId === id || (!!current?.desktop_thread_id && current.desktop_thread_id === s.threadId);
@@ -73,11 +74,12 @@ export function buildSessionPicker(address: ChannelAddress, sessions: Array<{ th
     const buttons: InlineButton[] = [];
     if (!isCurrent || options.pendingId) buttons.push({ text: options.pendingId ? '在此会话继续原消息' : '绑定此会话', callbackData: encodeSessionAction(address, s.sessionId ? { kind: 'resume', sessionId: s.sessionId, pendingId: options.pendingId } : { kind: 'enter', threadId: s.threadId, pendingId: options.pendingId }) });
     buttons.push({ text: subscribed ? '取消订阅' : '开启订阅', callbackData: encodeSessionAction(address, { kind: 'subscribe', threadId: s.threadId, enabled: !subscribed, offset, view, pendingId: options.pendingId }) });
+    buttons.push({ text: '会话详情', callbackData: encodeSessionAction(address, { kind: 'detail', threadId: s.threadId }) });
     const activity = s.lastEventAt && Number.isFinite(Date.parse(s.lastEventAt)) ? new Date(s.lastEventAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }) : '暂无记录';
     const project = path.basename(s.cwd || '') || '未指定目录';
     const title = s.title.replace(/[\r\n]/g, ' ').slice(0, 100) || '未命名会话';
     const origin = s.sessionId && s.sessionId === s.threadId ? 'IM 会话' : '桌面会话';
-    return { text: `**项目：${project}**${isCurrent ? ' · 当前绑定会话' : ''}\n会话：${title}\n路径：\`${s.cwd || '未指定'}\` · 来源：${origin} · 订阅：${subscribed ? '已订阅' : '未订阅'} · 最近活动：${activity}`, buttons };
+    return { text: `**📁 项目：${project}**${isCurrent ? ' ✅ 当前绑定' : ''}\n名称：${title}\n路径：\`${s.cwd || '未指定'}\`\n来源：${origin}\n订阅：${subscribed ? '🔔 已订阅' : '未订阅'}\n最近活动：${activity}`, buttons };
   });
   sections.push({ text: rows.length ? `分页：第 ${offset + 1}–${offset + rows.length} / ${filtered.length} 条 · 按最近活动倒序` : view === 'subscribed' ? '尚无可用订阅。到最近或全部会话中添加。' : '暂时没有可选会话。', buttons: [] });
   const buttons: InlineButton[][] = [[...(['recent','all','subscribed'] as PickerView[]).filter(v => v !== view).map(v => ({ text: v === 'recent' ? '最近活跃' : v === 'all' ? '全部会话' : '我的订阅', callbackData: encodeSessionAction(address, { kind: 'list', offset: 0, view: v, pendingId: options.pendingId }) }))]];
@@ -86,7 +88,7 @@ export function buildSessionPicker(address: ChannelAddress, sessions: Array<{ th
   if (view !== 'recent' && offset + rows.length < filtered.length) pagination.push({ text: '下一页', callbackData: encodeSessionAction(address, { kind: 'list', offset: offset+size, view, pendingId: options.pendingId }) });
   if (pagination.length) buttons.push(pagination);
   buttons.push([{ text: '新建会话', callbackData: encodeSessionAction(address, { kind: 'new', pendingId: options.pendingId }) }]);
-  return { text, sections, inlineButtons: [...sections.filter(s=>s.buttons.length).map(s=>s.buttons), ...buttons], navigationButtons: buttons, card: { title: '会话中心', template: 'turquoise', note: '每条依次为 项目 / 会话 / 路径 · 来源 · 订阅 · 最近活动。' } satisfies CardChrome };
+  return { text, sections, inlineButtons: [...sections.filter(s=>s.buttons.length).map(s=>s.buttons), ...buttons], navigationButtons: buttons, card: { title: '会话中心', template: 'turquoise', note: '每条依次为 项目 / 名称 / 路径 / 来源 / 订阅 / 最近活动。' } satisfies CardChrome };
 }
 
 export async function sendSessionPicker(adapter: BaseChannelAdapter, address: ChannelAddress, options: PickerOptions = {}): Promise<void> {
@@ -154,7 +156,7 @@ export function buildDirectoryPicker(address: ChannelAddress, dirs: string[], op
   try { resolvedCurrent = currentDir ? path.resolve(currentDir) : ''; } catch { resolvedCurrent = ''; }
   const text = `选择要在哪个目录下新建会话。\n默认工作空间：\`${getWorkspaceRoot()}\`` + (options.pendingId ? '\n选定目录后，之前保留的消息会自动继续。' : '');
   const sections = rows.map(dir => ({
-    text: `**目录：${path.basename(dir) || dir}**${resolvedCurrent && resolvedCurrent === dir ? ' · 当前会话目录' : ''}\n路径：\`${dir}\``,
+    text: `**📁 目录：${path.basename(dir) || dir}**${resolvedCurrent && resolvedCurrent === dir ? ' ✅ 当前会话目录' : ''}\n路径：\`${dir}\``,
     buttons: [{ text: '在此目录新建', callbackData: encodeSessionAction(address, { kind: 'newdir', dir, pendingId }) }] as InlineButton[],
   }));
   sections.push({ text: rows.length ? `分页：第 ${offset + 1}–${offset + rows.length} / ${dirs.length} 个目录` : '没有可选目录，可直接发送 `/new 项目名`。', buttons: [] as InlineButton[] });

@@ -58,7 +58,7 @@ export type OnToolEvent = (toolId: string, toolName: string, status: 'running' |
 export type OnTaskEvent = (tasks: TaskProgressInfo[]) => void;
 export type OnStatusNote = (note: string | null) => void;
 
-export type ConversationErrorCode = 'session_busy' | 'desktop_transport_lost';
+export type ConversationErrorCode = 'session_busy' | 'desktop_transport_lost' | 'desktop_writer_locked';
 
 const MAX_INBOUND_ATTACHMENT_BYTES = 100 * 1024 * 1024;
 const MAX_INBOUND_ATTACHMENTS_TOTAL_BYTES = 120 * 1024 * 1024;
@@ -108,8 +108,40 @@ const DEFAULT_DESKTOP_BUSY_RETRY_DELAYS_MS = [
   30_000,
 ];
 
+/**
+ * Writer-lock conflicts (thread locked by the Codex Desktop app or a previous
+ * turn's process still draining) rarely clear within a long retry window when
+ * the Desktop app keeps the thread open — fail fast with an actionable hint
+ * instead of burning ~90s of the user's time.
+ */
+const WRITER_LOCK_RETRY_DELAYS_MS = [2_000];
+
+export function isThreadWriterLockConflictMessage(message: string | null | undefined): boolean {
+  const lower = (message || '').toLowerCase();
+  return lower.includes('already has an active writer')
+    || lower.includes('thread-store conflict');
+}
+
+function getWriterLockRetryDelaysMs(): number[] {
+  const configured = process.env.CTI_WRITER_LOCK_RETRY_DELAYS_MS;
+  if (!configured?.trim()) return WRITER_LOCK_RETRY_DELAYS_MS;
+
+  const delays = configured
+    .split(',')
+    .map((part) => parseInt(part.trim(), 10))
+    .filter((value) => Number.isFinite(value) && value >= 0);
+  return delays.length > 0 ? delays : WRITER_LOCK_RETRY_DELAYS_MS;
+}
+
 export function isSessionBusyErrorMessage(message: string | null | undefined): boolean {
-  return (message || '').toLowerCase().includes('session is busy processing another request');
+  const lower = (message || '').toLowerCase();
+  // 'already has an active writer' / 'thread-store conflict': the bound Codex
+  // thread is locked by another writer (Desktop app or a previous turn still
+  // draining). Treat it as busy so desktop-backed sessions retry the SAME
+  // thread instead of silently forking a brand-new session.
+  return lower.includes('session is busy processing another request')
+    || lower.includes('already has an active writer')
+    || lower.includes('thread-store conflict');
 }
 
 function isDesktopBackedSessionForBusyRetry(session: BridgeSession | null): boolean {
@@ -136,14 +168,21 @@ function isRetryableDesktopBusyResult(result: ConversationResult): boolean {
     && result.permissionRequests.length === 0;
 }
 
-function formatDesktopBusyRetryNote(attempt: number, maxAttempts: number, delayMs: number): string {
+function formatDesktopBusyRetryNote(attempt: number, maxAttempts: number, delayMs: number, writerLock = false): string {
   const delaySeconds = Math.ceil(delayMs / 1000);
   const delayText = delaySeconds > 0 ? `${delaySeconds} 秒后` : '马上';
+  if (writerLock) {
+    return `桌面会话写入锁被其它进程占用（通常是 Codex Desktop App 正打开此会话），${delayText}重试（${attempt}/${maxAttempts}）。`;
+  }
   return `Codex Desktop thread 仍在处理上一轮请求，${delayText}重试（${attempt}/${maxAttempts}）。`;
 }
 
-function buildDesktopBusyExhaustedMessage(originalMessage: string): string {
+function buildDesktopBusyExhaustedMessage(originalMessage: string, writerLock = false): string {
   const detail = originalMessage?.trim();
+  if (writerLock) {
+    if (detail) console.warn('[conversation-engine] Desktop thread writer conflict:', detail);
+    return '该会话正在 Codex Desktop 中使用，暂时无法从飞书写入。你的消息尚未执行；请在 Desktop 切换到其它会话后重试，或在飞书新建会话继续。';
+  }
   return detail
     ? `Codex Desktop thread 仍在处理上一轮请求，请稍后重试。原始错误：${detail}`
     : 'Codex Desktop thread 仍在处理上一轮请求，请稍后重试。';
@@ -411,23 +450,28 @@ export async function processMessage(
         onStatusNote,
       );
 
-      if (!isRetryableDesktopBusyResult(result) || desktopBusyRetryDelaysMs.length === 0) {
+      const writerLockConflict = isThreadWriterLockConflictMessage(result.errorMessage);
+      const retryDelaysMs = writerLockConflict ? getWriterLockRetryDelaysMs() : desktopBusyRetryDelaysMs;
+
+      if (!isRetryableDesktopBusyResult(result) || retryDelaysMs.length === 0) {
         return result;
       }
 
-      if (desktopBusyRetryCount >= desktopBusyRetryDelaysMs.length) {
+      if (desktopBusyRetryCount >= retryDelaysMs.length) {
         return {
           ...result,
-          errorMessage: buildDesktopBusyExhaustedMessage(result.errorMessage),
+          errorCode: writerLockConflict ? 'desktop_writer_locked' : result.errorCode,
+          errorMessage: buildDesktopBusyExhaustedMessage(result.errorMessage, writerLockConflict),
         };
       }
 
-      const delayMs = desktopBusyRetryDelaysMs[desktopBusyRetryCount];
+      const delayMs = retryDelaysMs[desktopBusyRetryCount];
       desktopBusyRetryCount += 1;
       onStatusNote?.(formatDesktopBusyRetryNote(
         desktopBusyRetryCount,
-        desktopBusyRetryDelaysMs.length,
+        retryDelaysMs.length,
         delayMs,
+        writerLockConflict,
       ));
 
       const shouldRetry = await waitForRetryDelay(delayMs, abortController.signal);

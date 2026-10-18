@@ -1,4 +1,5 @@
 import { getBridgeContext } from './context.js';
+import { isEnvironmentalUserInjection } from '../../desktop-sessions.js';
 
 export function buildInteractiveStreamKey(sessionId: string, messageId: string): string {
   return `im:${sessionId}:${messageId}`;
@@ -35,6 +36,7 @@ const MIRROR_USER_REQUEST_MARKER = '## My request for Codex:';
 export function formatMirrorUserText(text: string | null | undefined): string | null {
   const normalized = (text || '').replace(/\r\n?/g, '\n').trim();
   if (!normalized) return null;
+  if (isEnvironmentalUserInjection(normalized)) return null;
 
   const lines = normalized.split('\n');
   const firstNonEmptyIndex = lines.findIndex((line) => line.trim().length > 0);

@@ -99,6 +99,29 @@ describe('message-driven sessions', () => {
     rememberSessionMessage(f.address,'card-A',a.id);const count=f.sent.length;
     assert.equal(await routeSessionReply(f.adapter,f.msg('继续','card-A'),f.deps),true);assert.equal(f.sent.length,count);
   });
+  it('selection notice includes the latest full prompt/response exchange for confirmation', async () => {
+    const f=setup();const a=f.store.createSession('A','','','/tmp');const b=f.store.createSession('B','','','/tmp');router.bindToSession(f.address,b.id);
+    f.store.addMessage(a.id,'user','之前的问题');
+    f.store.addMessage(a.id,'assistant','旧回复');
+    f.store.addMessage(a.id,'user','# AGENTS.md instructions for /tmp\n\n<INSTRUCTIONS>项目指引全文</INSTRUCTIONS>');
+    f.store.addMessage(a.id,'user','帮我看一下压测报告');
+    f.store.addMessage(a.id,'assistant','压测报告已生成，QPS 达到预期。');
+    await handleSessionAction(f.adapter,{...f.msg(''),callbackData:encodeSessionAction(f.address,{kind:'resume',sessionId:a.id})},f.deps);
+    const notice=f.sent.at(-1).text;
+    assert.match(notice,/已切换到「A」/);
+    assert.match(notice,/• 目录：\/tmp/);
+    assert.match(notice,/🗂 最近交互\n\nUser：帮我看一下压测报告\n\nCodex：压测报告已生成，QPS 达到预期。/);
+    assert.match(notice,/不会启动任务/);
+    assert.doesNotMatch(notice,/之前的问题/);
+    assert.doesNotMatch(notice,/AGENTS\.md/);
+  });
+  it('selection notice marks an unanswered prompt explicitly', async () => {
+    const f=setup();const a=f.store.createSession('A','','','/tmp');const b=f.store.createSession('B','','','/tmp');router.bindToSession(f.address,b.id);
+    f.store.addMessage(a.id,'user','这条还没有回复');
+    await handleSessionAction(f.adapter,{...f.msg(''),callbackData:encodeSessionAction(f.address,{kind:'resume',sessionId:a.id})},f.deps);
+    const notice=f.sent.at(-1).text;
+    assert.match(notice,/User：这条还没有回复\n\nCodex：\(尚无回复\)/);
+  });
   it('Feishu action acknowledgement does not claim selection succeeded', async () => {
     const f=setup();const a:any=new FeishuAdapter({id:f.address.channelType,provider:'feishu',alias:'test',enabled:true,config:{appId:'test',appSecret:'test'}});
     a.isAuthorized=()=>true;const queued:any[]=[];a.enqueueInboundMessage=(m:any)=>queued.push(m);
@@ -157,6 +180,23 @@ describe('message-driven sessions', () => {
     assert.equal(calls, 0);
     assert.match(f.sent[0].cardChrome?.title || '', /会话中心/);
     assert.equal(f.sent[0].sessionPicker?.recent, true);
+  });
+  it('session detail button shows the latest three exchanges without starting a model turn', async () => {
+    const f = setup(); let calls = 0;
+    initBridgeContext({ store: f.store, llm: { streamChat: () => { calls++; return new ReadableStream(); } }, permissions: { resolvePendingPermission: () => false }, lifecycle: {} });
+    const a = f.store.createSession('A', '', '', '/tmp/project-a');
+    for (let i = 1; i <= 4; i++) {
+      f.store.addMessage(a.id, 'user', `第${i}个问题`);
+      f.store.addMessage(a.id, 'assistant', `第${i}个回复`);
+    }
+    await handleSessionAction(f.adapter, { ...f.msg(''), callbackData: encodeSessionAction(f.address, { kind: 'detail', threadId: a.id }) }, f.deps);
+    assert.equal(calls, 0);
+    const notice = f.sent.at(-1).text;
+    assert.match(notice, /📋 会话详情：「A」/);
+    assert.match(notice, /最近交互/);
+    assert.match(notice, /第2个问题/);
+    assert.match(notice, /第4个回复/);
+    assert.doesNotMatch(notice, /第1个问题/);
   });
   it('Chinese menu aliases resolve to commands without starting a model turn', async () => {
     const f = setup(); let calls = 0;

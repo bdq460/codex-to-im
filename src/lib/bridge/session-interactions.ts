@@ -5,7 +5,11 @@ import type { BaseChannelAdapter } from './channel-adapter.js';
 import { getBridgeContext } from './context.js';
 import * as router from './channel-router.js';
 import { decodeSessionAction, newSessionCommand, sendDirectoryPicker, sendSessionPicker } from './session-navigation.js';
-import { getDesktopSessionByThreadIdSafe, resolveNewWorkingDirectory } from './bridge-session-support.js';
+import { getDesktopSessionByThreadIdSafe, getDesktopThreadTitle, resolveNewWorkingDirectory, resolveSessionDisplayName } from './bridge-session-support.js';
+import { getExplicitDesktopThreadId } from './turns/turn-classifier.js';
+import type { BridgeSession } from './host.js';
+import { readDesktopSessionMessages } from '../../desktop-sessions.js';
+import { formatCommandPath, summarizeLastExchange, summarizeRecentExchanges } from './command-formatters.js';
 import { deliverBridgeNotice } from './feedback-delivery.js';
 import { getPendingMessage, claimPendingMessage, finishPendingMessage, releasePendingMessage, sessionForMessage, savePendingMessage } from './session-interaction-store.js';
 
@@ -20,6 +24,59 @@ function usableSession(id: string) {
   if (session.thread_origin === 'desktop' && !getDesktopSessionByThreadIdSafe(session.desktop_thread_id || session.sdk_session_id || '', 'message reply')) return null;
   return session;
 }
+/** Latest-turn summary from the desktop thread (preferred) or the bridge cache. */
+function describeLastInteraction(session: BridgeSession): string {
+  const desktopThreadId = getExplicitDesktopThreadId(session);
+  if (desktopThreadId) {
+    try {
+      return summarizeLastExchange(readDesktopSessionMessages(desktopThreadId, 6));
+    } catch { /* fall back to the bridge cache below */ }
+  }
+  const { messages } = getBridgeContext().store.getMessages(session.id, { limit: 6 });
+  return summarizeLastExchange(messages);
+}
+
+/** Compact session detail: what the Codex chat window shows for the most recent exchanges. */
+async function sendSessionDetail(adapter: BaseChannelAdapter, address: import('./types.js').ChannelAddress, threadId: string): Promise<void> {
+  const { store } = getBridgeContext();
+  const desktop = getDesktopSessionByThreadIdSafe(threadId, 'session detail');
+  if (desktop) {
+    let recent = '暂无记录';
+    try { recent = summarizeRecentExchanges(readDesktopSessionMessages(threadId, 24), 3); } catch { /* keep placeholder */ }
+    const activity = Number.isFinite(Date.parse(desktop.lastEventAt)) ? new Date(desktop.lastEventAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }) : '暂无记录';
+    await deliverBridgeNotice(adapter, address, [
+      `**📋 会话详情：「${desktop.title.replace(/[\r\n]/g, ' ').slice(0, 100) || '未命名会话'}」**`,
+      '',
+      `- **目录**：${formatCommandPath(desktop.cwd)}`,
+      `- **最近活动**：${activity}`,
+      '',
+      '**🗂 最近交互**（与 Codex 聊天框一致）',
+      '',
+      recent,
+      '',
+      '_仅摘要展示；完整内容请到 Codex 中查看。_',
+    ].join('\n'));
+    return;
+  }
+  const session = usableSession(threadId) || store.getSession(threadId);
+  if (!session) {
+    await deliverBridgeNotice(adapter, address, '这条会话已归档或不可用，请刷新列表后重试。');
+    return;
+  }
+  const { messages } = store.getMessages(session.id, { limit: 24 });
+  await deliverBridgeNotice(adapter, address, [
+    `**📋 会话详情：「${resolveSessionDisplayName(session).replace(/[\r\n]/g, ' ')}」**`,
+    '',
+    `- **目录**：${formatCommandPath(session.working_directory)}`,
+    '',
+    '**🗂 最近交互**（与 Codex 聊天框一致）',
+    '',
+    summarizeRecentExchanges(messages, 3),
+    '',
+    '_仅摘要展示；完整内容请到 Codex 中查看。_',
+  ].join('\n'));
+}
+
 async function selectSession(adapter: BaseChannelAdapter, msg: InboundMessage, id: string, deps: Dependencies, confirmSelection = false, hasPendingMessage = false): Promise<boolean> {
   const { store } = getBridgeContext();
   const session = usableSession(id);
@@ -35,9 +92,21 @@ async function selectSession(adapter: BaseChannelAdapter, msg: InboundMessage, i
     return false;
   }
   if (changed || confirmSelection) {
-    const title = (session.name || '未命名会话').replace(/[\r\n]/g, ' ');
-    const notice = await deliverBridgeNotice(adapter, msg.address,
-      `${changed ? '已切换到' : '当前已是'}「${title}」。\n${hasPendingMessage ? '之前保留的消息将继续执行。' : '下一条普通消息将发送到此会话；选择本身不会启动任务。'}引用其它结果回复会切换到其所属会话。`);
+    const title = resolveSessionDisplayName(session).replace(/[\r\n]/g, ' ');
+    const lastInteraction = describeLastInteraction(session);
+    const notice = await deliverBridgeNotice(adapter, msg.address, [
+      `**${changed ? '🔄 已切换到' : '📍 当前已是'}「${title}」**`,
+      '',
+      `- **目录**：${formatCommandPath(session.working_directory)}`,
+      '',
+      '**🗂 最近交互**',
+      '',
+      lastInteraction,
+      '',
+      hasPendingMessage
+        ? '▶️ 之前保留的消息将继续执行。'
+        : '💬 下一条普通消息将发送到此会话；选择本身不会启动任务。引用其它结果回复会切换到其所属会话。',
+    ].join('\n'));
     if (!notice.ok) throw new Error(notice.error || '会话选择结果发送失败');
   }
   if (changed || confirmSelection) await adapter.refreshSessionCards?.(msg.address);
@@ -60,6 +129,10 @@ export async function handleSessionAction(adapter: BaseChannelAdapter, msg: Inbo
     if (!await adapter.updateDirPicker?.(msg.address, options, msg.callbackMessageId)) await sendDirectoryPicker(adapter, msg.address, options);
     return;
   }
+  if (action.kind === 'detail') {
+    await sendSessionDetail(adapter, msg.address, action.threadId);
+    return;
+  }
   if (action.kind === 'subscribe') {
     const { store } = getBridgeContext();
     let session = store.getSession(action.threadId) || store.findSessionBySdkSessionId(action.threadId);
@@ -69,7 +142,12 @@ export async function handleSessionAction(adapter: BaseChannelAdapter, msg: Inbo
     }
     if (!session || (action.enabled && !usableSession(session.id))) { await deliverBridgeNotice(adapter, msg.address, '会话不可用，请刷新列表。'); return; }
     setNotificationSubscription(store, msg.address, session.id, action.enabled);
-    await deliverBridgeNotice(adapter, msg.address, `${action.enabled ? '已订阅' : '已取消订阅'}「${session.name}」的通知。当前绑定会话保持不变；你主动发起的任务仍会回复。`);
+    await deliverBridgeNotice(adapter, msg.address, [
+      `**${action.enabled ? '🔔 已订阅' : '🔕 已取消订阅'}「${resolveSessionDisplayName(session)}」的通知**`,
+      '',
+      '- 当前绑定会话保持不变',
+      '- 你主动发起的任务仍会回复',
+    ].join('\n'));
     await adapter.refreshSessionCards?.(msg.address);
     if (!adapter.refreshSessionCards) await sendSessionPicker(adapter, msg.address, { offset: action.offset, view: action.view, pendingId: action.pendingId });
     return;

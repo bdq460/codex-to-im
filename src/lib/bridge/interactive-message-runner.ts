@@ -1,4 +1,5 @@
 import path from 'node:path';
+import crypto from 'node:crypto';
 import type {
   ChannelBinding,
   InboundMessage,
@@ -11,6 +12,9 @@ import type { BaseChannelAdapter, StructuredStreamingUiSnapshot } from './channe
 import * as router from './channel-router.js';
 import * as engine from './conversation-engine.js';
 import * as broker from './permission-broker.js';
+import { deliver } from './delivery-layer.js';
+import { savePendingMessage } from './session-interaction-store.js';
+import { encodeSessionAction } from './session-navigation.js';
 import { getBridgeContext } from './context.js';
 import {
   assembleDesktopFinalResponse,
@@ -825,7 +829,12 @@ export async function runInteractiveMessage(
       return;
     }
 
-    const terminalAfterProcess = await waitForDesktopTerminalFinalization();
+    // A writer-lock rejection happens before Desktop accepts a turn. There is
+    // no terminal event to await, even though prompt preparation marked one
+    // as expected for the normal Desktop reuse path.
+    const terminalAfterProcess = result.errorCode === 'desktop_writer_locked'
+      ? null
+      : await waitForDesktopTerminalFinalization();
     if (!deps.isCurrentInteractiveTask(binding.codepilotSessionId, taskId)) {
       shouldRecordHealthEnd = false;
       return;
@@ -928,6 +937,25 @@ export async function runInteractiveMessage(
           errorMessage: result.errorMessage,
         }),
       );
+    }
+
+    if (adapter.provider === 'feishu' && desktopThreadId && result.errorCode === 'desktop_writer_locked' && !staleResponse) {
+      const pendingId = savePendingMessage(msg, crypto.randomUUID());
+      try {
+        const actionResult = await deliver(adapter, {
+          address: msg.address,
+          text: '原消息已保留，尚未执行。关闭或切走 Codex Desktop 中的这个会话后，可重试原消息；也可新建会话继续。',
+          parseMode: 'Markdown',
+          cardChrome: { title: '选择如何继续', template: 'orange' },
+          inlineButtons: [
+            [{ text: '重试原消息', callbackData: encodeSessionAction(msg.address, { kind: 'resume', sessionId: binding.codepilotSessionId, pendingId }) }],
+            [{ text: '新建会话继续', callbackData: encodeSessionAction(msg.address, { kind: 'new', pendingId }) }],
+          ],
+        }, { sessionId: binding.codepilotSessionId });
+        if (!actionResult.ok) console.warn('[interactive-message-runner] Could not send writer-lock recovery actions:', actionResult.error);
+      } catch (error) {
+        console.warn('[interactive-message-runner] Could not send writer-lock recovery actions:', error);
+      }
     }
 
     try {

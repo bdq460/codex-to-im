@@ -956,6 +956,103 @@ describe('CodexProvider', () => {
     assert.ok(!errorEvent, 'Retry success should not emit error');
     assert.ok(resultEvent, 'Retry success should emit result');
   });
+
+  it('does not swap to a fresh thread when resume hits an active writer conflict', async () => {
+    const { CodexProvider } = await import('../codex-provider.js');
+    const { PendingPermissions } = await import('../permission-gateway.js');
+    const provider = new CodexProvider(new PendingPermissions());
+
+    let resumeCalls = 0;
+    let startCalls = 0;
+    const resumeThread = {
+      runStreamed: async () => {
+        throw new Error(
+          'Codex Exec exited with code 1: '
+          + 'ERROR codex_core::session::session: failed to initialize thread persistence: '
+          + 'thread-store conflict: thread 01a13994-72b8-7612-b5ba-24d024a67e6d already has an active writer',
+        );
+      },
+    };
+    const freshThread = {
+      runStreamed: () => ({
+        events: (async function* () {
+          yield { type: 'turn.completed', usage: { input_tokens: 2, output_tokens: 3, cached_input_tokens: 0 } };
+        })(),
+      }),
+    };
+
+    (provider as any).sdk = { Codex: class { constructor() {} } };
+    (provider as any).codex = {
+      resumeThread: () => {
+        resumeCalls += 1;
+        return resumeThread;
+      },
+      startThread: () => {
+        startCalls += 1;
+        return freshThread;
+      },
+    };
+
+    const stream = provider.streamChat({
+      prompt: 'writer conflict test',
+      sessionId: 'writer-conflict-session',
+      sdkSessionId: 'codex-bound-thread-id',
+    });
+
+    const chunks = await collectStream(stream);
+    const events = parseSSEChunks(chunks);
+    const errorEvent = events.find(e => e.type === 'error');
+
+    assert.equal(resumeCalls, 1, 'Should attempt resume once');
+    assert.equal(startCalls, 0, 'Writer conflict must not silently swap in a fresh thread');
+    assert.ok(errorEvent, 'Writer conflict should surface as an error event');
+    assert.match(String(errorEvent!.data), /active writer/);
+    assert.equal(
+      (provider as any).threadIds.get('writer-conflict-session'),
+      undefined,
+      'Cached thread id must not be overwritten by a fresh thread',
+    );
+  });
+
+  it('rethrows when resumeThread throws an active writer conflict synchronously', async () => {
+    const { CodexProvider } = await import('../codex-provider.js');
+    const { PendingPermissions } = await import('../permission-gateway.js');
+    const provider = new CodexProvider(new PendingPermissions());
+
+    let startCalls = 0;
+    const freshThread = {
+      runStreamed: () => ({
+        events: (async function* () {
+          yield { type: 'turn.completed', usage: { input_tokens: 2, output_tokens: 3, cached_input_tokens: 0 } };
+        })(),
+      }),
+    };
+
+    (provider as any).sdk = { Codex: class { constructor() {} } };
+    (provider as any).codex = {
+      resumeThread: () => {
+        throw new Error('thread/resume: thread/resume failed: thread abc already has an active writer (code -32600)');
+      },
+      startThread: () => {
+        startCalls += 1;
+        return freshThread;
+      },
+    };
+
+    const stream = provider.streamChat({
+      prompt: 'sync writer conflict test',
+      sessionId: 'sync-writer-conflict-session',
+      sdkSessionId: 'codex-bound-thread-id',
+    });
+
+    const chunks = await collectStream(stream);
+    const events = parseSSEChunks(chunks);
+    const errorEvent = events.find(e => e.type === 'error');
+
+    assert.equal(startCalls, 0, 'Synchronous writer conflict must not fall back to startThread');
+    assert.ok(errorEvent, 'Synchronous writer conflict should surface as an error event');
+    assert.match(String(errorEvent!.data), /active writer/);
+  });
 });
 
 // ── Image input building tests ──────────────────────────────

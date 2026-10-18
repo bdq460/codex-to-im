@@ -128,7 +128,21 @@ function shouldSkipGitRepoCheck(): boolean {
   return process.env.CTI_CODEX_SKIP_GIT_REPO_CHECK === 'true';
 }
 
+/**
+ * Codex thread-store writer conflicts: the target thread is currently locked by
+ * another writer (Codex Desktop holding the thread, or a previous turn's child
+ * process still shutting down). This is a transient busy state — the bound
+ * thread must NOT be silently swapped for a fresh one, otherwise the binding is
+ * hijacked and all subsequent turns run in a brand-new session.
+ */
+function isThreadWriterConflictErrorMessage(message: string): boolean {
+  const lower = message.toLowerCase();
+  return lower.includes('already has an active writer')
+    || lower.includes('thread-store conflict');
+}
+
 function shouldRetryFreshThread(message: string): boolean {
+  if (isThreadWriterConflictErrorMessage(message)) return false;
   const lower = message.toLowerCase();
   return (
     lower.includes('resuming session with different model') ||
@@ -505,7 +519,16 @@ export class CodexProvider implements LLMProvider {
               if (savedThreadId) {
                 try {
                   thread = codex.resumeThread(savedThreadId, threadOptions);
-                } catch {
+                } catch (err) {
+                  const message = err instanceof Error ? err.message : String(err);
+                  if (isThreadWriterConflictErrorMessage(message)) {
+                    // The bound thread is locked by another active writer.
+                    // Never silently swap in a fresh thread — surface the
+                    // conflict so the busy-retry path can wait it out.
+                    console.warn(`[codex-provider] Resume blocked by an active writer for thread=${savedThreadId}:`, message);
+                    throw err;
+                  }
+                  console.warn('[codex-provider] resumeThread threw, starting a fresh thread:', message);
                   thread = codex.startThread(threadOptions);
                 }
               } else {

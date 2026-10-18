@@ -7,6 +7,7 @@ import {
   buildHealthCommandResponse,
   buildHealthListResponse,
   buildCommandFields,
+  buildDesktopSwitchNotice,
   buildDesktopThreadsCommandResponse,
   DEFAULT_DESKTOP_THREAD_LIST_LIMIT,
   formatCommandDateTime,
@@ -22,6 +23,7 @@ import {
   parseDesktopThreadListArgs,
   resolveByIndexOrPrefix,
   resolveCommandAlias,
+  summarizeLastExchange,
   toUserVisibleBindingError,
   truncateHistoryContent,
 } from './command-helpers.js';
@@ -361,13 +363,10 @@ export async function handleBridgeCommand(
             parsedArgs.force ? 'forced' : undefined,
           );
           const session = store.getSession(binding.codepilotSessionId);
-          response = buildCommandFields(
-            '已切换到桌面会话',
-            [
-              ['标题', desktop?.title || getSessionDisplayName(session, binding.workingDirectory)],
-              ['目录', formatCommandPath(binding.workingDirectory)],
-            ],
-            ['接下来直接发送文本即可继续。'],
+          response = buildDesktopSwitchNotice(
+            desktop?.title || getSessionDisplayName(session, binding.workingDirectory),
+            binding.workingDirectory,
+            summarizeLastExchange(readDesktopSessionMessages(threadArgs, 6)),
             responseParseMode === 'Markdown',
           );
           break;
@@ -398,13 +397,10 @@ export async function handleBridgeCommand(
         binding,
         parsedArgs.force ? 'forced' : undefined,
       );
-      response = buildCommandFields(
-        '已切换到桌面会话',
-        [
-          ['标题', threadPick.match.title || '未命名线程'],
-          ['目录', formatCommandPath(binding.workingDirectory)],
-        ],
-        ['接下来直接发送文本即可继续。'],
+      response = buildDesktopSwitchNotice(
+        threadPick.match.title || '未命名线程',
+        binding.workingDirectory,
+        summarizeLastExchange(readDesktopSessionMessages(threadPick.match.threadId, 6)),
         responseParseMode === 'Markdown',
       );
       break;

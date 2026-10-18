@@ -6,11 +6,13 @@ import path from 'node:path';
 
 import { CTI_HOME } from '../config.js';
 import { JsonFileStore } from '../store.js';
-import { initBridgeContext } from '../lib/bridge/context.js';
+import { getBridgeContext, initBridgeContext } from '../lib/bridge/context.js';
 import { BaseChannelAdapter } from '../lib/bridge/channel-adapter.js';
 import type { InboundMessage, OutboundAttachment, OutboundMessage, SendResult } from '../lib/bridge/types.js';
 import * as router from '../lib/bridge/channel-router.js';
 import { formatInteractiveRuntimeStatus, runInteractiveMessage, type InteractiveTaskState } from '../lib/bridge/interactive-message-runner.js';
+import { decodeSessionAction } from '../lib/bridge/session-navigation.js';
+import { getPendingMessage } from '../lib/bridge/session-interaction-store.js';
 import type { ActiveBridgeTurn } from '../lib/bridge/turns/turn-types.js';
 
 const DATA_DIR = path.join(CTI_HOME, 'data');
@@ -162,6 +164,56 @@ describe('interactive-message-runner', () => {
     assert.equal(formatInteractiveRuntimeStatus(1_000, 3_610_000), '已运行 1秒，上次响应距今 1小时10秒');
     assert.equal(formatInteractiveRuntimeStatus(1_000, 3_720_000), '已运行 1秒，上次响应距今 1小时2分');
     assert.equal(formatInteractiveRuntimeStatus(1_000, 3_730_000), '已运行 1秒，上次响应距今 1小时2分10秒');
+  });
+
+  it('preserves a Desktop writer-conflict message and offers safe retry or new-session actions', async () => {
+    const adapter = new FakeFeishuStreamingAdapter();
+    const address = { channelType: 'feishu-default', channelProvider: 'feishu', chatId: 'chat-writer-conflict', userId: 'user-writer-conflict' } as const;
+    const binding = router.createBinding(address, '/tmp/writer-conflict');
+    const contextStore = getBridgeContext().store;
+    contextStore.updateSession(binding.codepilotSessionId, {
+      thread_origin: 'desktop',
+      desktop_thread_id: '01a1431c-daae-7763-92e3-3ea7132d5907',
+      sdk_session_id: '01a1431c-daae-7763-92e3-3ea7132d5907',
+    });
+    const tasks = new Map<string, InteractiveTaskState>();
+    const incoming: InboundMessage = { messageId: 'incoming-writer-conflict', address, text: '测试一下', timestamp: Date.now() };
+    const startedAt = Date.now();
+    await runInteractiveMessage(adapter, incoming, incoming.text, undefined, {
+      desktopTerminalFinalizationTimeoutMs: 2_000,
+      registerInteractiveTask(task) { tasks.set(task.sessionId, task); },
+      resetMirrorSessionForInteractiveRun() {},
+      isCurrentInteractiveTask(sessionId, taskId) { return tasks.get(sessionId)?.id === taskId; },
+      touchInteractiveTask() {},
+      recordInteractiveHealthStart() {},
+      recordInteractiveHealthProgress() {},
+      recordInteractiveHealthTool() {},
+      recordInteractiveHealthEnd() {},
+      beginMirrorSuppression() { return 'suppression-writer-conflict'; },
+      abortMirrorSuppression() {},
+      settleMirrorSuppression() {},
+      releaseInteractiveTask(sessionId, taskId) { if (tasks.get(sessionId)?.id === taskId) tasks.delete(sessionId); },
+      async deliverResponse() { return { ok: true }; },
+      persistSdkSessionUpdate() {},
+      processMessageImpl: async (_binding, _text, _onPermission, _abort, _files, _onText, _onTool, _onTask, _onStatus, onPromptPrepared) => {
+        onPromptPrepared?.('测试一下');
+        return {
+          responseText: '', outboundAttachments: [], tokenUsage: null, hasError: true,
+          errorMessage: '该会话正在 Codex Desktop 中使用，暂时无法从飞书写入。',
+          errorCode: 'desktop_writer_locked' as const, permissionRequests: [], sdkSessionId: null,
+        };
+      },
+    });
+    const actions = adapter.sentMessages.flatMap(message => message.inlineButtons?.flat() || [])
+      .filter(action => action.text === '重试原消息' || action.text === '新建会话继续');
+    assert.deepEqual(actions.map(action => action.text), ['重试原消息', '新建会话继续']);
+    const retry = decodeSessionAction(actions[0]!.callbackData!, address);
+    const newSession = decodeSessionAction(actions[1]!.callbackData!, address);
+    assert.equal(retry?.kind, 'resume');
+    assert.equal(newSession?.kind, 'new');
+    assert.equal(retry?.pendingId, newSession?.pendingId);
+    assert.equal(getPendingMessage(address, retry!.pendingId!)?.message.text, incoming.text);
+    assert.ok(Date.now() - startedAt < 1_000, 'writer rejection must not wait for a Desktop terminal event');
   });
 
   it('records a failed health outcome when the final response cannot be delivered', async () => {

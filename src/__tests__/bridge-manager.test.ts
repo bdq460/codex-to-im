@@ -155,6 +155,7 @@ describe('bridge-manager resolveNewWorkingDirectory', () => {
   });
 
   it('reuses the current formal session directory when /new has no args', () => {
+    const workDir = path.resolve('/tmp/project-a');
     const resolved = _testOnly.resolveNewSessionWorkingDirectory(
       '',
       {
@@ -163,7 +164,7 @@ describe('bridge-manager resolveNewWorkingDirectory', () => {
         chatId: 'chat-1',
         codepilotSessionId: 'session-1',
         sdkSessionId: '',
-        workingDirectory: 'D:\\workspace\\project-a',
+        workingDirectory: workDir,
         model: 'test-model',
         mode: 'code',
         active: true,
@@ -173,14 +174,14 @@ describe('bridge-manager resolveNewWorkingDirectory', () => {
       {
         id: 'session-1',
         name: 'Project A',
-        working_directory: 'D:\\workspace\\project-a',
+        working_directory: workDir,
         model: 'test-model',
         session_type: 'normal',
       },
     );
     assert.deepEqual(resolved, {
       ok: true,
-      workDir: path.resolve('D:\\workspace\\project-a'),
+      workDir,
     });
   });
 
@@ -274,7 +275,7 @@ describe('bridge-manager resolveCommandAlias', () => {
       false,
       10,
     );
-    assert.match(response, /^最近 2 条桌面会话/);
+    assert.match(response, /^【最近 2 条桌面会话】/);
   });
 
   it('renders all-thread list titles with the actual displayed count', () => {
@@ -295,7 +296,7 @@ describe('bridge-manager resolveCommandAlias', () => {
       true,
       200,
     );
-    assert.match(response, /^桌面会话（当前显示 1 条，最多 200 条）/);
+    assert.match(response, /^【桌面会话（当前显示 1 条，最多 200 条）】/);
   });
 
   it('maps short session and history aliases', () => {
@@ -702,6 +703,19 @@ describe('bridge-manager status formatting', () => {
     assert.equal(_testOnly.formatMirrorUserText(unknownWrapped), unknownWrapped);
   });
 
+  it('drops AGENTS.md instruction injections from the user mirror text', () => {
+    const injection = [
+      '# AGENTS.md instructions for /Users/x/project',
+      '',
+      '<INSTRUCTIONS>',
+      '# Agent 协作指南',
+      '很长的项目指引内容……',
+      '</INSTRUCTIONS>',
+    ].join('\n');
+
+    assert.equal(_testOnly.formatMirrorUserText(injection), null);
+  });
+
   it('buffers desktop user mirror text into the active turn instead of finalizing immediately', () => {
     const subscription = {
       pendingTurn: null,
@@ -1016,13 +1030,14 @@ describe('bridge-manager status formatting', () => {
       lastDeliveredAt: null,
     });
 
+    const imagePath = path.resolve('/tmp/out.png');
     const result = await _testOnly.deliverMirrorTurns(subscription, [{
       streamKey: 'mirror:session-1:turn-1',
       userText: 'desktop prompt',
       text: [
         '结果如下',
         '',
-        '<cti-send>{"type":"image","path":"D:\\\\workspace\\\\out.png","caption":"结果图"}</cti-send>',
+        `<cti-send>{"type":"image","path":${JSON.stringify(imagePath)},"caption":"结果图"}</cti-send>`,
       ].join('\n'),
       signature: 'complete',
       timestamp: '2026-03-25T08:00:03.000Z',
@@ -1045,7 +1060,7 @@ describe('bridge-manager status formatting', () => {
         text: '',
         attachments: [{
           kind: 'image',
-          path: 'D:\\workspace\\out.png',
+          path: imagePath,
           caption: '结果图',
           name: undefined,
         }],
