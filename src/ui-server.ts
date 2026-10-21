@@ -405,6 +405,7 @@ function configToPayload(config: Config) {
     streamStatusIdleStartSeconds: config.streamStatusIdleStartSeconds ?? 180,
     streamStatusCheckIntervalSeconds: config.streamStatusCheckIntervalSeconds ?? 10,
     codexSkipGitRepoCheck: config.codexSkipGitRepoCheck === true,
+    desktopConflictGuard: config.desktopConflictGuard !== false,
     codexSandboxMode: config.codexSandboxMode || 'workspace-write',
     codexReasoningEffort: config.codexReasoningEffort || 'medium',
     uiAllowLan: config.uiAllowLan === true,
@@ -469,6 +470,7 @@ function mergeConfig(payload: Record<string, unknown>): Config {
       || current.streamStatusCheckIntervalSeconds
       || 10,
     codexSkipGitRepoCheck: payload.codexSkipGitRepoCheck === true,
+    desktopConflictGuard: payload.desktopConflictGuard !== false,
     codexSandboxMode: payload.codexSandboxMode === 'read-only'
       || payload.codexSandboxMode === 'danger-full-access'
       ? payload.codexSandboxMode
@@ -2470,6 +2472,10 @@ function renderHtml(): string {
               </div>
               <div class="small">如果新建会话报 “Not inside a trusted directory”，可以打开这个选项。修改后需要重启 Bridge 才会生效。</div>
               <div class="checkbox-row" style="margin-top: 12px;">
+                <label class="checkbox"><input id="desktopConflictGuard" type="checkbox" checked /> 检测到 Codex 桌面版运行时先确认再执行</label>
+              </div>
+              <div class="small">Codex 桌面版（ChatGPT App 的 Codex 模式）运行期间，IM 消息会因会话写锁冲突（thread-store conflict）执行失败。开启后消息会被拦下并发送确认卡片，确认后自动退出 ChatGPT（Codex 桌面版寄生于其中，会一并关闭）并继续执行原消息；桌面正在运行的任务会被中断，会话历史保留。修改后立即生效，仅支持 macOS。</div>
+              <div class="checkbox-row" style="margin-top: 12px;">
                 <label class="checkbox"><input id="uiAllowLan" type="checkbox" /> 允许局域网访问 Web 控制台</label>
               </div>
               <div class="notice" id="uiAccessSummary">默认仅允许本机访问当前工作台。</div>
@@ -2885,6 +2891,7 @@ function renderHtml(): string {
           defaultWorkspaceRoot: document.getElementById('defaultWorkspaceRoot').value,
           defaultModel: document.getElementById('defaultModel').value,
           codexSkipGitRepoCheck: document.getElementById('codexSkipGitRepoCheck').checked,
+          desktopConflictGuard: document.getElementById('desktopConflictGuard').checked,
           codexSandboxMode: document.getElementById('codexSandboxMode').value,
           codexReasoningEffort: document.getElementById('codexReasoningEffort').value,
           uiAllowLan: document.getElementById('uiAllowLan').checked,
@@ -3061,6 +3068,7 @@ function renderHtml(): string {
         streamStatusIdleStartSeconds: '上次响应距今显示启动时长',
         streamStatusCheckIntervalSeconds: '上次响应距今检查间隔',
         codexSkipGitRepoCheck: '允许在未信任 Git 目录运行 Codex',
+        desktopConflictGuard: '检测到 Codex 桌面版运行时先确认再执行',
         codexSandboxMode: 'Codex 文件系统权限',
         codexReasoningEffort: 'Codex 思考级别',
         uiAllowLan: '允许局域网访问 Web 控制台',
@@ -3665,6 +3673,7 @@ function renderHtml(): string {
         renderDefaultModelOptions(config);
         renderReasoningEffortOptions(config);
         document.getElementById('codexSkipGitRepoCheck').checked = config.codexSkipGitRepoCheck === true;
+        document.getElementById('desktopConflictGuard').checked = config.desktopConflictGuard !== false;
         document.getElementById('codexSandboxMode').value = config.codexSandboxMode || 'workspace-write';
         document.getElementById('uiAllowLan').checked = config.uiAllowLan === true;
         document.getElementById('uiAccessToken').value = config.uiAccessToken || '';

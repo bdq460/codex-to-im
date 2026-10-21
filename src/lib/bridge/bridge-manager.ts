@@ -2,9 +2,16 @@ import { syncAutomaticNotifications } from './automatic-notification-runtime.js'
 import { notificationChatAddresses } from './notification-subscriptions.js';
 import { deliverSubscribedResponse } from './subscribed-response-delivery.js';
 import { initializeChatSubscriptions } from './notification-subscriptions.js';
-import { sendSessionPicker } from './session-navigation.js';
+import { sendSessionPicker, encodeSessionAction } from './session-navigation.js';
 import { handleSessionAction, routeSessionReply, sessionInteractionLockId } from './session-interactions.js';
 import { savePendingMessage, rememberSessionMessage } from './session-interaction-store.js';
+import { deliver } from './delivery-layer.js';
+import { isCodexDesktopRunning, quitCodexDesktop } from './desktop-app-control.js';
+import { loadConfig } from '../../config.js';
+
+// Overridable in tests so the desktop-conflict guard stays deterministic even when a
+// real Codex desktop app happens to run on the dev machine.
+let desktopRunningProbe: () => Promise<boolean> = isCodexDesktopRunning;
 /**
  * Bridge Manager — singleton orchestrator for the multi-IM bridge system.
  *
@@ -921,6 +928,7 @@ async function handleMessage(
     busy: (id: string) => !!INTERACTIVE_RUNTIME.getActiveTask(id),
     command: handleCommand,
     replay: handleMessage,
+    quitDesktop: quitCodexDesktop,
   };
   if (msg.callbackData?.startsWith('session:')) {
     try { await handleSessionAction(adapter, msg, sessionInteractionDeps); }
@@ -1067,6 +1075,29 @@ async function handleMessage(
     }
   }
 
+  // While the Codex desktop app (Codex mode inside ChatGPT.app) is running, its host
+  // process holds the thread writer and every bridged message fails with
+  // "thread-store conflict: already has an active writer" (Codex Exec exit 1). Hold the
+  // message and ask the user: quitting only the desktop process group keeps the ChatGPT
+  // background alive. Guarded by desktopConflictGuard (default on, no restart needed).
+  if (adapter.provider === 'feishu' && binding && loadConfig().desktopConflictGuard !== false
+      && (text || hasAttachments) && await desktopRunningProbe()) {
+    const pendingId = savePendingMessage(msg);
+    const summary = (text || '[附件消息]').replace(/\s+/g, ' ').trim().slice(0, 80) || '[附件消息]';
+    const sent = await deliver(adapter, {
+      address: msg.address,
+      text: `检测到 Codex 桌面版正在运行：它持有的会话写锁会让 IM 消息执行失败（thread-store conflict）。\n\n原消息已保留：${summary}\n\n可退出 ChatGPT（Codex 桌面版寄生于其中，会一并关闭）后自动继续执行。桌面正在运行的任务会被中断，会话历史保留。`,
+      cardChrome: { title: 'Codex 桌面版正在运行', template: 'orange' },
+      inlineButtons: [
+        [{ text: '退出 ChatGPT 并执行', callbackData: encodeSessionAction(msg.address, { kind: 'quitdesktop', proceed: true, pendingId }) }],
+        [{ text: '取消，暂不执行', callbackData: encodeSessionAction(msg.address, { kind: 'quitdesktop', proceed: false, pendingId }) }],
+      ],
+    });
+    if (!sent.ok) console.warn('[bridge-manager] Desktop conflict confirm card failed:', sent.error);
+    ack();
+    return;
+  }
+
   if (adapter.provider === 'feishu' && binding) rememberSessionMessage(msg.address, msg.messageId, binding.codepilotSessionId);
   await runInteractiveMessage(adapter, msg, text, hasAttachments ? msg.attachments : undefined, {
       registerInteractiveTask: (task) => INTERACTIVE_RUNTIME.registerInteractiveTask(task),
@@ -1201,6 +1232,7 @@ function resetStateForTests(): void {
 /** @internal */
 export const _testOnly = {
   setAutomaticNotificationDiscovery: (discover: Parameters<typeof syncAutomaticNotifications>[2]) => { automaticNotificationDiscovery = discover; },
+  setDesktopRunningProbe: (probe: (() => Promise<boolean>) | null) => { desktopRunningProbe = probe ?? isCodexDesktopRunning; },
   handleMessage,
   syncConfiguredAdapters: (options: { startLoops: boolean }) => ADAPTER_RUNTIME.syncConfiguredAdapters(options),
   reconcileMirrorSubscriptions,

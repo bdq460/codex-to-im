@@ -10,6 +10,8 @@ import { encodeSessionAction, selectableDirectories, selectableSessions, decodeS
 import { handleSessionAction, routeSessionReply, sessionInteractionLockId } from '../lib/bridge/session-interactions.js';
 import { rememberSessionMessage, sessionForMessage, savePendingMessage, getPendingMessage, navigationSecret } from '../lib/bridge/session-interaction-store.js';
 import { _testOnly } from '../lib/bridge/bridge-manager.js';
+// Default probe off so existing flows stay deterministic; guard-specific tests override it.
+_testOnly.setDesktopRunningProbe(async () => false);
 import { FeishuAdapter } from '../lib/bridge/adapters/feishu-adapter.js';
 import { deliverTextResponse } from '../lib/bridge/feedback-delivery.js';
 import * as router from '../lib/bridge/channel-router.js';
@@ -21,9 +23,79 @@ function setup() {
   const adapter: any = { provider: 'feishu', channelType: address.channelType, isAuthorized: () => true, send: async (m: any) => { sent.push(m); return { ok: true, messageId: crypto.randomUUID() }; } };
   const msg = (text = '继续修改', replyToMessageId?: string) => ({ address, messageId: crypto.randomUUID(), timestamp: Date.now(), text, replyToMessageId });
   const replays: any[] = [];
-  const deps = { busy: () => false, command: async () => {}, replay: async (_a: any, m: any) => { replays.push(m); } };
+  const deps = { busy: () => false, command: async () => {}, replay: async (_a: any, m: any) => { replays.push(m); }, quitDesktop: async () => ({ ok: true, detail: 'test quit' }) };
   return { store, sent, address, adapter, msg, deps, replays };
 }
+describe('desktop conflict guard', () => {
+  it('holds bound-chat messages behind a confirm card while the desktop app runs', async () => {
+    const f = setup();
+    const session = f.store.createSession('工作会话', '', '', '/tmp');
+    router.bindToSession(f.address, session.id);
+    let llmCalls = 0;
+    initBridgeContext({ store: f.store, llm: { streamChat: () => { llmCalls++; return new ReadableStream({ start(c) { c.close(); } }); } }, permissions: { resolvePendingPermission: () => false }, lifecycle: {} });
+    _testOnly.setDesktopRunningProbe(async () => true);
+    try {
+      const m = f.msg('执行部署');
+      await _testOnly.handleMessage(f.adapter, m);
+      assert.equal(llmCalls, 0);
+      const card = f.sent.find(x => /Codex 桌面版正在运行/.test(x.text || ''));
+      assert.ok(card, 'confirm card sent');
+      assert.match(card.text, /执行部署/);
+      const run = card.inlineButtons.flat().find((b: any) => b.text === '退出 ChatGPT 并执行');
+      const cancel = card.inlineButtons.flat().find((b: any) => b.text === '取消，暂不执行');
+      assert.ok(run && cancel);
+      assert.equal(getPendingMessage(f.address, m.messageId)?.status, 'waiting');
+      await handleSessionAction(f.adapter, { ...f.msg(''), callbackData: cancel.callbackData }, f.deps);
+      assert.equal(getPendingMessage(f.address, m.messageId)?.status, 'done');
+      assert.equal(f.replays.length, 0);
+      assert.match(f.sent.at(-1).text, /已取消/);
+      await handleSessionAction(f.adapter, { ...f.msg(''), callbackData: run.callbackData }, f.deps);
+      assert.equal(f.replays.length, 0);
+      assert.match(f.sent.at(-1).text, /请勿重复点击/);
+    } finally {
+      _testOnly.setDesktopRunningProbe(async () => false);
+    }
+  });
+
+  it('confirming quits the desktop process group and replays the held message', async () => {
+    const f = setup();
+    const session = f.store.createSession('工作会话', '', '', '/tmp');
+    router.bindToSession(f.address, session.id);
+    _testOnly.setDesktopRunningProbe(async () => true);
+    try {
+      const m = f.msg('执行部署');
+      await _testOnly.handleMessage(f.adapter, m);
+      const card = f.sent.find(x => /Codex 桌面版正在运行/.test(x.text || ''));
+      const run = card.inlineButtons.flat().find((b: any) => b.text === '退出 ChatGPT 并执行');
+      await handleSessionAction(f.adapter, { ...f.msg(''), callbackData: run.callbackData }, f.deps);
+      assert.equal(f.replays.length, 1);
+      assert.equal(f.replays[0].text, '执行部署');
+      assert.equal(getPendingMessage(f.address, m.messageId)?.status, 'done');
+    } finally {
+      _testOnly.setDesktopRunningProbe(async () => false);
+    }
+  });
+
+  it('failed quit releases the pending message and asks the user to close manually', async () => {
+    const f = setup();
+    const session = f.store.createSession('工作会话', '', '', '/tmp');
+    router.bindToSession(f.address, session.id);
+    _testOnly.setDesktopRunningProbe(async () => true);
+    try {
+      const m = f.msg('执行部署');
+      await _testOnly.handleMessage(f.adapter, m);
+      const card = f.sent.find(x => /Codex 桌面版正在运行/.test(x.text || ''));
+      const run = card.inlineButtons.flat().find((b: any) => b.text === '退出 ChatGPT 并执行');
+      await handleSessionAction(f.adapter, { ...f.msg(''), callbackData: run.callbackData }, { ...f.deps, quitDesktop: async () => ({ ok: false, detail: '超时' }) });
+      assert.equal(f.replays.length, 0);
+      assert.equal(getPendingMessage(f.address, m.messageId)?.status, 'waiting');
+      assert.match(f.sent.at(-1).text, /未能自动关闭/);
+    } finally {
+      _testOnly.setDesktopRunningProbe(async () => false);
+    }
+  });
+});
+
 describe('message-driven sessions', () => {
   for (const kind of ['im', 'mirror']) {
     it(`${kind} streaming result persists original session and renders actions even after binding changes`, async () => {

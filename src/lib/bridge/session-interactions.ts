@@ -17,6 +17,8 @@ type Dependencies = {
   busy: (id: string) => boolean;
   command: (adapter: BaseChannelAdapter, msg: InboundMessage, text: string) => Promise<void>;
   replay: (adapter: BaseChannelAdapter, msg: InboundMessage) => Promise<void>;
+  /** Terminates the Codex desktop process group; injectable for tests. */
+  quitDesktop: () => Promise<{ ok: boolean; alreadyClosed?: boolean; detail: string }>;
 };
 function usableSession(id: string) {
   const session = getBridgeContext().store.getSession(id);
@@ -159,6 +161,29 @@ export async function handleSessionAction(adapter: BaseChannelAdapter, msg: Inbo
   const current = store.getChannelBinding(msg.address.channelType, msg.address.chatId);
   if (current && deps.busy(current.codepilotSessionId) && (action.kind !== 'resume' || action.sessionId !== current.codepilotSessionId)) {
     await deliverBridgeNotice(adapter, msg.address, '当前会话正在执行任务。完成后再次选择即可继续，原消息已保留。'); return;
+  }
+  if (action.kind === 'quitdesktop') {
+    const pending = action.pendingId ? claimPendingMessage(msg.address, action.pendingId) : null;
+    if (!pending || !action.pendingId) {
+      await deliverBridgeNotice(adapter, msg.address, '这条消息已处理、正在执行或已过期，请勿重复点击。'); return;
+    }
+    if (!action.proceed) {
+      finishPendingMessage(msg.address, action.pendingId);
+      await deliverBridgeNotice(adapter, msg.address, '已取消：原消息不再执行，需要时请重新发送。');
+      return;
+    }
+    await deliverBridgeNotice(adapter, msg.address, '正在退出 ChatGPT（含 Codex 桌面版），完成后自动执行原消息…');
+    const quit = await deps.quitDesktop();
+    if (!quit.ok) {
+      releasePendingMessage(msg.address, action.pendingId);
+      await deliverBridgeNotice(adapter, msg.address, `未能自动关闭 Codex 桌面版：${quit.detail}\n请手动关闭后重新发送原消息。`);
+      return;
+    }
+    // Safe to replay blindly: deps.replay re-enters handleMessage, and the desktop
+    // processes are gone by now so the conflict guard will not intercept again.
+    await deps.replay(adapter, pending);
+    finishPendingMessage(msg.address, action.pendingId);
+    return;
   }
   if (action.kind === 'enter' && !getDesktopSessionByThreadIdSafe(action.threadId, 'session selection')) {
     await deliverBridgeNotice(adapter, msg.address, '这条会话已归档或不可用，请重新选择。');

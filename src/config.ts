@@ -30,6 +30,7 @@ export interface RuntimeConfigV2 {
   streamStatusIdleStartSeconds?: number;
   streamStatusCheckIntervalSeconds?: number;
   codexSkipGitRepoCheck?: boolean;
+  desktopConflictGuard?: boolean;
   codexSandboxMode?: CodexSandboxMode;
   codexReasoningEffort?: CodexReasoningEffort;
   uiAllowLan?: boolean;
@@ -92,6 +93,7 @@ export interface Config {
   streamStatusIdleStartSeconds?: number;
   streamStatusCheckIntervalSeconds?: number;
   codexSkipGitRepoCheck?: boolean;
+  desktopConflictGuard?: boolean;
   codexSandboxMode?: CodexSandboxMode;
   codexReasoningEffort?: CodexReasoningEffort;
   uiAllowLan?: boolean;
@@ -368,6 +370,9 @@ function migrateLegacyEnvToV2(env: Map<string, string>): ConfigV2File {
       codexSkipGitRepoCheck: env.has("CTI_CODEX_SKIP_GIT_REPO_CHECK")
         ? env.get("CTI_CODEX_SKIP_GIT_REPO_CHECK") === "true"
         : true,
+      desktopConflictGuard: env.has("CTI_DESKTOP_CONFLICT_GUARD")
+        ? env.get("CTI_DESKTOP_CONFLICT_GUARD") === "true"
+        : true,
       codexSandboxMode: parseSandboxMode(env.get("CTI_CODEX_SANDBOX_MODE")) ?? 'workspace-write',
       codexReasoningEffort: parseReasoningEffort(env.get("CTI_CODEX_REASONING_EFFORT")) ?? 'medium',
       uiAllowLan: env.get("CTI_UI_ALLOW_LAN") === "true",
@@ -401,6 +406,7 @@ function expandConfig(v2: ConfigV2File): Config {
     streamStatusIdleStartSeconds: v2.runtime.streamStatusIdleStartSeconds ?? DEFAULT_STREAM_STATUS_IDLE_START_SECONDS,
     streamStatusCheckIntervalSeconds: v2.runtime.streamStatusCheckIntervalSeconds ?? DEFAULT_STREAM_STATUS_CHECK_INTERVAL_SECONDS,
     codexSkipGitRepoCheck: v2.runtime.codexSkipGitRepoCheck ?? true,
+    desktopConflictGuard: v2.runtime.desktopConflictGuard ?? true,
     codexSandboxMode: v2.runtime.codexSandboxMode ?? 'workspace-write',
     codexReasoningEffort: parseReasoningEffort(v2.runtime.codexReasoningEffort) ?? 'medium',
     uiAllowLan: v2.runtime.uiAllowLan === true,
@@ -472,6 +478,7 @@ function buildV2FileFromExpandedConfig(
       streamStatusIdleStartSeconds: config.streamStatusIdleStartSeconds,
       streamStatusCheckIntervalSeconds: config.streamStatusCheckIntervalSeconds,
       codexSkipGitRepoCheck: config.codexSkipGitRepoCheck,
+      desktopConflictGuard: config.desktopConflictGuard,
       codexSandboxMode: config.codexSandboxMode,
       codexReasoningEffort: config.codexReasoningEffort,
       uiAllowLan: config.uiAllowLan,
@@ -515,6 +522,7 @@ export function loadConfig(): Config {
         streamStatusIdleStartSeconds: DEFAULT_STREAM_STATUS_IDLE_START_SECONDS,
         streamStatusCheckIntervalSeconds: DEFAULT_STREAM_STATUS_CHECK_INTERVAL_SECONDS,
         codexSkipGitRepoCheck: true,
+        desktopConflictGuard: true,
         codexSandboxMode: 'workspace-write',
         codexReasoningEffort: 'medium',
         uiAllowLan: false,
@@ -557,6 +565,9 @@ export function saveConfig(config: Config): void {
   }
   if (next.runtime.codexSkipGitRepoCheck !== undefined) {
     out += formatEnvLine("CTI_CODEX_SKIP_GIT_REPO_CHECK", String(next.runtime.codexSkipGitRepoCheck));
+  }
+  if (next.runtime.desktopConflictGuard !== undefined) {
+    out += formatEnvLine("CTI_DESKTOP_CONFLICT_GUARD", String(next.runtime.desktopConflictGuard));
   }
   out += formatEnvLine("CTI_CODEX_SANDBOX_MODE", next.runtime.codexSandboxMode);
   out += formatEnvLine("CTI_CODEX_REASONING_EFFORT", next.runtime.codexReasoningEffort);
@@ -655,6 +666,10 @@ export function configToSettings(config: Config): Map<string, string> {
   m.set(
     "bridge_codex_skip_git_repo_check",
     config.codexSkipGitRepoCheck === true ? "true" : "false",
+  );
+  m.set(
+    "bridge_desktop_conflict_guard",
+    config.desktopConflictGuard === false ? "false" : "true",
   );
   m.set(
     "bridge_codex_sandbox_mode",

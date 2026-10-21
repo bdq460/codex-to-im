@@ -158,6 +158,12 @@ describe('configToSettings', () => {
     assert.equal(m.get('bridge_codex_skip_git_repo_check'), 'true');
   });
 
+  it('maps desktop conflict guard with default-on semantics', () => {
+    assert.equal(configToSettings({ ...base }).get('bridge_desktop_conflict_guard'), 'true');
+    assert.equal(configToSettings({ ...base, desktopConflictGuard: false }).get('bridge_desktop_conflict_guard'), 'false');
+    assert.equal(configToSettings({ ...base, desktopConflictGuard: true }).get('bridge_desktop_conflict_guard'), 'true');
+  });
+
   it('maps codex sandbox mode and reasoning effort', () => {
     const m = configToSettings({
       ...base,

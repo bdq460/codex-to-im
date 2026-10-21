@@ -22,7 +22,7 @@ const DIR_SCAN_EXCLUDES = new Set(['node_modules', '__pycache__', '.git', 'dist'
 export type PickerView = 'recent' | 'all' | 'subscribed';
 export type PickerOptions = { unbound?: boolean; offset?: number; recent?: boolean; pendingId?: string; view?: PickerView };
 export type DirPickerOptions = { offset?: number; pendingId?: string };
-export type SessionAction = ({ kind: 'enter'; threadId: string } | { kind: 'resume'; sessionId: string } | { kind: 'list'; offset: number; view?: PickerView } | { kind: 'subscribe'; threadId: string; enabled: boolean; offset?: number; view?: PickerView } | { kind: 'detail'; threadId: string } | { kind: 'new' } | { kind: 'newpick'; offset?: number } | { kind: 'newdir'; dir: string }) & { pendingId?: string };
+export type SessionAction = ({ kind: 'enter'; threadId: string } | { kind: 'resume'; sessionId: string } | { kind: 'quitdesktop'; proceed: boolean } | { kind: 'list'; offset: number; view?: PickerView } | { kind: 'subscribe'; threadId: string; enabled: boolean; offset?: number; view?: PickerView } | { kind: 'detail'; threadId: string } | { kind: 'new' } | { kind: 'newpick'; offset?: number } | { kind: 'newdir'; dir: string }) & { pendingId?: string };
 
 export function encodeSessionAction(address: ChannelAddress, action: SessionAction, now = Date.now()): string {
   const payload = Buffer.from(JSON.stringify({ channel: address.channelType, chat: address.chatId, action, expires: now + (action.pendingId ? 24 * 60 * 60_000 : (action.kind === 'resume' || action.kind === 'subscribe') ? 90 * 24 * 60 * 60_000 : TTL) })).toString('base64url');
@@ -45,6 +45,7 @@ export function decodeSessionAction(data: string, address: ChannelAddress, now =
     if (a?.offset !== undefined && (!Number.isInteger(a.offset) || a.offset < 0 || a.offset >= 200)) return null;
     if (a?.kind === 'subscribe' && typeof a.enabled === 'boolean' && typeof a.threadId === 'string' && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(a.threadId)) return a;
     if (a?.pendingId !== undefined && (typeof a.pendingId !== 'string' || a.pendingId.length > 256)) return null;
+    if (a?.kind === 'quitdesktop' && typeof a.proceed === 'boolean') return a;
     if (a?.kind === 'resume' && typeof a.sessionId === 'string' && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(a.sessionId)) return a;
     if (a?.kind === 'enter' && typeof a.threadId === 'string' && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(a.threadId)) return a;
     if (a?.kind === 'detail' && typeof a.threadId === 'string' && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(a.threadId)) return a;

@@ -13,6 +13,8 @@ import { FeishuAdapter } from '../lib/bridge/adapters/feishu-adapter.js';
 import { JsonFileStore } from '../store.js';
 import { initBridgeContext } from '../lib/bridge/context.js';
 import { _testOnly } from '../lib/bridge/bridge-manager.js';
+// Keep the desktop-conflict guard deterministic even when a real Codex desktop app runs on this machine.
+_testOnly.setDesktopRunningProbe(async () => false);
 import { listDesktopSessions } from '../desktop-sessions.js';
 
 const address = { channelType: 'feishu-test', chatId: 'chat-1', userId: 'user-1' };

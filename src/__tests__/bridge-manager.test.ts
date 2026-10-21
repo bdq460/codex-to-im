@@ -9,6 +9,8 @@ import { CTI_HOME } from '../config.js';
 import { JsonFileStore } from '../store.js';
 import { initBridgeContext } from '../lib/bridge/context.js';
 import { _testOnly, start } from '../lib/bridge/bridge-manager.js';
+// Keep the desktop-conflict guard deterministic even when a real Codex desktop app runs on this machine.
+_testOnly.setDesktopRunningProbe(async () => false);
 import { BaseChannelAdapter, registerAdapterFactory } from '../lib/bridge/channel-adapter.js';
 import { createMirrorSubscription } from '../lib/bridge/mirror-subscription-state.js';
 import * as router from '../lib/bridge/channel-router.js';
